@@ -1,3 +1,10 @@
 node_modules
 .env
-workingmongo_data/
+working/
+mongo_data/
+
+# Local MongoDB data
+mongo_data/
+
+# Local working notes
+working/
