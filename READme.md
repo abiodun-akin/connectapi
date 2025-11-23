@@ -1,143 +1,100 @@
+#!/usr/bin/env bash
 
-# 🌦️ Weather Report App
+# Connect API — README
 
-A simple Node.js + Express REST API app that allows users to **create**, **read**, **update**, and **delete** (CRUD) weather reports. Built with **MongoDB** and **Mongoose**, this app demonstrates middleware use, model handling, and API route structuring.
+# Connect API
 
----
-
-## 📁 Features
-
-- Create weather reports
-- Read a specific report by ID
-- Update existing reports
-- Delete reports
-- Middleware for fetching report by ID
-- Request validation with error handling
+A small Node.js + Express backend that provides authentication and resource CRUD patterns, intended as the server component for other apps or demos. The project uses MongoDB (Mongoose) for persistence and supports cookie-based JWT authentication.
 
 ---
 
-## 🛠️ Tech Stack
+## Quick Links
 
-- **Node.js**
-- **Express.js**
-- **MongoDB** (via Mongoose)
-- **dotenv**
-- **nodemon** (for development)
-- **validator**
-- **jwtwebtoken**
-- **bcryptjs**
-- **cookie-parser**
+- Project root: `index.js`
+- Auth routes: mounted at `/api/auth` (signup, login, logout)
+- Middleware: `middleware/` contains request helpers
 
 ---
 
-## 📦 Installation
+## Getting started
 
-```bash
-git clone https://github.com/your-username/weatherapp.git
-cd weatherapp
+Prerequisites:
+
+- Node.js 18+ or a compatible LTS
+- MongoDB instance (local or remote)
+
+Install and run:
+
+```powershell
+git clone https://github.com/abiodun-akin/connectapi.git
+cd connectapi
 npm install
 ```
 
----
-
-## ⚙️ Configuration
-
-Create a `.env` file in the root with the following:
+Create a `.env` with at minimum:
 
 ```
 PORT=3000
-MONGODB_URI=mongodb://localhost:27017/weatherapp
+CONN_STR=mongodb://localhost:27017/connectapi
+TOKEN_SECRET=your_jwt_secret
+FRONTEND_ORIGIN=http://localhost:5173
 ```
 
-> Replace the MongoDB URI with your own if necessary.
+Start in development:
 
----
-
-## 🚀 Running the App
-
-```bash
-# Development mode
+```powershell
 npm run dev
+```
 
-# Production
-npm start
+Or with Docker Compose (if you want the bundled MongoDB):
+
+```powershell
+docker compose up -d
 ```
 
 ---
 
-## 📬 API Endpoints
+## Authentication endpoints (examples)
 
-| Method | Route                | Description            |
-|--------|---------------------|------------------------|
-| GET    | `/report/:id`       | Get a single report    |
-| POST   | `/report`           | Create a new report    |
-| PUT    | `/report/:id`       | Update an existing one |
-| DELETE | `/report/:id`       | Delete a report        |
+The auth router (`routes/auth.js`) exposes these endpoints under `/api/auth`:
+
+- `POST /api/auth/signup` — create a new user (name, email, password)
+- `POST /api/auth/login` — authenticate and receive a cookie-based JWT (email, password)
+- `POST /api/auth/logout` — clear the authentication cookie
+
+Requests and responses follow JSON conventions; the server sets an `httpOnly` cookie named `jwt` on successful login/signup.
 
 ---
 
-## 🧠 Sample Report Schema
+## Project structure
 
-```json
-{
-  "title": "Heavy Rain in Lagos",
-  "location": "Lagos, Nigeria",
-  "desc": "Strong winds and heavy rainfall expected throughout the week."
-}
+```
+connectapi/
+├── index.js                # App entry (server setup, routes)
+├── package.json
+├── Dockerfile
+├── docker-compose.yml      # optional local MongoDB service
+├── db.js                   # mongo connection helper
+├── user.js                 # user model + auth helpers
+├── routes/
+│   └── auth.js             # signup/login/logout
+├── middleware/
+│   ├── requireAuth.js      # protects routes
+│   └── getreport.js        # (left in codebase) resource lookup helper
+├── mongo_data/             # local MongoDB data (if used with compose)
+└── README.md
 ```
 
 ---
 
-## ✨ Example Usage
+## Notes
 
-### Create a report
-
-```http
-POST /report
-Content-Type: application/json
-
-{
-  "title": "Sunny Day",
-  "location": "Cairo",
-  "desc": "Clear skies with warm temperatures"
-}
-```
+- The app uses cookie-based JWTs for authentication. Tokens are signed with `TOKEN_SECRET` from `.env`.
+- Adjust `FRONTEND_ORIGIN` in `.env` to match your frontend host for CORS.
 
 ---
 
-## 🧩 Folder Structure
+If you'd like, I can also:
 
-```
-weatherapp/
-│
-├── models/
-│   └── Report.js         # Mongoose model
-│
-├── middlewares/
-│   └── getreport.js      # Middleware to fetch report by ID
-│
-├── index.js              # Main entry point
-├── .env                  # Environment config
-└── README.md             # You are here 😄
-```
-
----
-
-## 🐞 Error Handling
-
-Graceful responses with `400`, `404`, and `500` status codes depending on the error context. All errors are logged to the console.
-
----
-
-## 🧪 Future Improvements
-
-- User authentication
-- Filtering and search
-- File/image upload support
-- Frontend UI
-
----
-
-
-
-
+- Remove or rename any remaining files that reference the previous 'report' resource (e.g. `report.js`, `middleware/getreport.js`) and update the server accordingly.
+- Commit and push the new README for you.
