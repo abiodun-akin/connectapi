@@ -1,0 +1,12 @@
+GET http://localhost:3000/api
+
+###
+
+POST http://localhost:3000/api/report
+Content-Type: application/json
+
+{
+    "title": "Test Report",
+    "location": "Test Location",
+    "desc": "This is a test report."
+}
