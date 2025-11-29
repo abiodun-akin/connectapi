@@ -15,8 +15,7 @@ services:
       - JWT_SECRET=djhdsfisdfiosdfsfdsfjsdfsihsdfhisdfdsf
       - NODE_ENV=development
       - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
-      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
-      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
     volumes:
       - ./:/home/node/app
     networks:
@@ -37,8 +36,7 @@ services:
     working_dir: /home/node/app
     environment:
       - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
-      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
-      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
     volumes:
       - ./:/home/node/app
     networks:

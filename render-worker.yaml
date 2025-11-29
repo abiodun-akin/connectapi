@@ -7,7 +7,5 @@ services:
     envVars:
       - key: RABBITMQ_URL
         sync: false
-      - key: ONESIGNAL_APP_ID
-        sync: false
-      - key: ONESIGNAL_API_KEY
+      - key: RESEND_API_KEY
         sync: false
