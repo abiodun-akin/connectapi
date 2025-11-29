@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
 const User = require("../user");
+const { publishEvent } = require("../middleware/eventNotification");
 
 console.log("In auth routes");
 
@@ -29,6 +30,8 @@ router.post("/signup", async (req, res) => {
       sameSite: "strict",
       maxAge: 24 * 60 * 60 * 1000,
     });
+
+    publishEvent('auth_events', 'auth.signup', { userId: user._id, email: user.email, name: user.name });
 
     res.status(201).json({
       message: "User created successfully",
@@ -63,6 +66,8 @@ router.post("/login", async (req, res) => {
       maxAge: 24 * 60 * 60 * 1000,
     });
 
+    publishEvent('auth_events', 'auth.login', { userId: user._id, email: user.email });
+
     res.json({
       message: "Login successful",
       user: { id: user._id, email: user.email },
@@ -79,6 +84,8 @@ router.post("/logout", (req, res) => {
     maxAge: 0,
     sameSite: "strict",
   });
+
+  publishEvent('auth_events', 'auth.logout', { timestamp: new Date() });
 
   res.json({ message: "Logged out successfully" });
 });

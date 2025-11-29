@@ -2,17 +2,6 @@ networks:
   farmconnect:
     driver: bridge
 services:
-  # Define the ConnectAPI service
-  # === 1. REACT FRONTEND SERVICE (NEW) ===
-  # farmapp:
-  #   build:
-  #     context: D:/reactapp/farmapp # Assumes your React code is in a 'frontend' subdirectory
-  #     dockerfile: Dockerfile.react
-  #   container_name: farmapp
-  #   ports:
-  #     - "3000:80"
-  #   networks:
-  #     - farmconnect
   connectapi:
     build:
       context: .
@@ -20,26 +9,45 @@ services:
     container_name: connectapi
     user: "node"
     working_dir: /home/node/app
-
     environment:
       - PORT=8888
       - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin
       - JWT_SECRET=djhdsfisdfiosdfsfdsfjsdfsihsdfhisdfdsf
       - NODE_ENV=development
+      - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
+      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
+      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
     volumes:
       - ./:/home/node/app
     networks:
       - farmconnect
     ports:
       - "8888:8888"
-
     command: npm run dev
     depends_on:
       - mongodb
-      - broker
     restart: unless-stopped
 
-  # Define the MongoDB service
+  notification-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification-worker
+    user: "node"
+    working_dir: /home/node/app
+    environment:
+      - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
+      - ONESIGNAL_APP_ID=${ONESIGNAL_APP_ID}
+      - ONESIGNAL_API_KEY=${ONESIGNAL_API_KEY}
+    volumes:
+      - ./:/home/node/app
+    networks:
+      - farmconnect
+    command: npm run worker
+    depends_on:
+      - connectapi
+    restart: unless-stopped
+
   mongodb:
     image: bhioux/mongodb:1.0
     container_name: mongodb
@@ -56,7 +64,6 @@ services:
       - "27017:27017"
     restart: unless-stopped
 
-  #Define the MondoDB Express service
   mongo-express:
     image: mongo-express
     container_name: mongo-express
@@ -72,33 +79,6 @@ services:
       - mongodb
     restart: unless-stopped
 
-    # Define the Kafka broker service
-  broker:
-    image: bhioux/kafka:1.0
-    container_name: broker
-    ports:
-      - "9092:9092"
-    volumes:
-      - "kafka_data:/bitnami"
-    networks:
-      - farmconnect
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
-    restart: unless-stopped
-
 volumes:
-  kafka_data:
-    driver: local
   mongo_data:
     driver: local

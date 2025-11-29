@@ -5,8 +5,13 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const userRoutes = require("./routes/auth");
+const paymentRoutes = require("./routes/payment");
 const requireAuth = require("./middleware/requireAuth");
 const getreport = require("./middleware/getreport");
+const {
+  initializeRabbitMQ,
+  eventNotificationMiddleware,
+} = require("./middleware/eventNotification");
 
 const Report = require("./report");
 
@@ -20,11 +25,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    sameSite: "none",
     credentials: true,
   })
 );
 
+app.use(eventNotificationMiddleware);
+
 app.use("/api/auth", userRoutes);
+app.use("/api/payment", paymentRoutes);
 
 app.use(requireAuth);
 
@@ -102,6 +111,8 @@ app.use((req, res) => {
 
 const startServer = async () => {
   try {
+    await initializeRabbitMQ();
+
     await mongoose.connect(process.env.CONN_STR, {
       useNewUrlParser: true,
       useUnifiedTopology: true,

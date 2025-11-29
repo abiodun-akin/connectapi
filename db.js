@@ -5,7 +5,7 @@ const dbConnect = () => {
   moongoese
     .connect(
       process.env.CONN_STR ||
-        "mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin"
+        "mongodb+srv://connect_db_user:iQedFIijzEs5BmxR@connectdb.n0yqaed.mongodb.net/?appName=Connectdb"
     )
     .then(() => {
       console.log("MongoDB connected successfully");

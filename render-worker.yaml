@@ -1,0 +1,13 @@
+services:
+  - type: background_worker
+    name: notification-worker
+    env: node
+    buildCommand: npm install
+    startCommand: npm run worker
+    envVars:
+      - key: RABBITMQ_URL
+        sync: false
+      - key: ONESIGNAL_APP_ID
+        sync: false
+      - key: ONESIGNAL_API_KEY
+        sync: false
