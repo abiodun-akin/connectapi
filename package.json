@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "worker": "node workers/notificationWorker.js"
+    "worker": "node workers/notificationWorker.js",
+    "cron": "node workers/cronJob.js"
   },
   "keywords": [],
   "author": "",

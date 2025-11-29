@@ -1,0 +1,14 @@
+services:
+  - type: cron
+    name: notification-cron
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm run cron
+    schedule: "*/5 * * * *"
+    envVars:
+      - key: RABBITMQ_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
