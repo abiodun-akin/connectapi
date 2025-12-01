@@ -1,0 +1,12 @@
+{
+  "unstable": ["cron"],
+  "tasks": {
+    "start": "deno run -A deno_cron.ts"
+  },
+  "fmt": {
+    "options": {
+      "useTabs": false,
+      "lineWidth": 100
+    }
+  }
+}

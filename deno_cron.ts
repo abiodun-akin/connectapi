@@ -1,8 +1,8 @@
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-
-const RABBITMQ_URL = Deno.env.get("RABBITMQ_URL")!;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
-const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL")!;
+const RABBITMQ_HTTP_API = Deno.env.get("RABBITMQ_HTTP_API") || "";
+const RABBITMQ_USER = Deno.env.get("RABBITMQ_USER") || "";
+const RABBITMQ_PASS = Deno.env.get("RABBITMQ_PASS") || "";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
+const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "";
 
 const emailTemplates: Record<string, { subject: string; html: string }> = {
   "auth.signup": {
@@ -35,7 +35,11 @@ const emailTemplates: Record<string, { subject: string; html: string }> = {
   },
 };
 
-async function sendEmail(email: string, eventType: string, data: Record<string, unknown>) {
+async function sendEmail(
+  email: string,
+  eventType: string,
+  data: Record<string, unknown>
+) {
   const template = emailTemplates[eventType];
   if (!template) return;
 
@@ -43,7 +47,7 @@ async function sendEmail(email: string, eventType: string, data: Record<string, 
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -61,32 +65,35 @@ async function sendEmail(email: string, eventType: string, data: Record<string, 
 
 async function processMessages() {
   try {
-    const amqpUrl = new URL(RABBITMQ_URL);
-    const response = await fetch(`${amqpUrl.protocol}//${amqpUrl.host}/api/queues`, {
+    const auth = btoa(`${RABBITMQ_USER}:${RABBITMQ_PASS}`);
+    const apiUrl = RABBITMQ_HTTP_API.endsWith("/")
+      ? RABBITMQ_HTTP_API
+      : `${RABBITMQ_HTTP_API}/`;
+    const response = await fetch(`${apiUrl}queues`, {
       headers: {
-        "Authorization": `Basic ${btoa(`${amqpUrl.username}:${amqpUrl.password}`)}`,
+        Authorization: `Basic ${auth}`,
       },
     });
 
-    const queues = await response.json() as Array<{ name: string }>;
+    const queues = (await response.json()) as Array<{ name: string }>;
     const targetQueues = ["auth_notifications", "payment_notifications"];
 
     for (const queue of queues) {
       if (!targetQueues.includes(queue.name)) continue;
 
-      const msgResponse = await fetch(
-        `${amqpUrl.protocol}//${amqpUrl.host}/api/queues/${amqpUrl.pathname.slice(1)}/${queue.name}/get`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Basic ${btoa(`${amqpUrl.username}:${amqpUrl.password}`)}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ ackmode: "ack_requeue_true", count: 100 }),
-        }
-      );
+      const msgResponse = await fetch(`${apiUrl}queues/%2F/${queue.name}/get`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ackmode: "ack_requeue_true", count: 100 }),
+      });
 
-      const messages = await msgResponse.json() as Array<{ payload: string; properties: { routing_key: string } }>;
+      const messages = (await msgResponse.json()) as Array<{
+        payload: string;
+        properties: { routing_key: string };
+      }>;
       for (const msg of messages) {
         const data = JSON.parse(atob(msg.payload)) as Record<string, unknown>;
         await sendEmail(data.email as string, msg.properties.routing_key, data);
@@ -99,7 +106,9 @@ async function processMessages() {
   }
 }
 
-serve(async (req) => {
+Deno.cron("process messages", "*/1 * * * *", processMessages);
+
+Deno.serve(async (req) => {
   if (req.method === "POST") {
     await processMessages();
     return new Response("OK");
