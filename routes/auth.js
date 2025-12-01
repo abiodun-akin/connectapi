@@ -31,11 +31,16 @@ router.post("/signup", async (req, res) => {
       maxAge: 24 * 60 * 60 * 1000,
     });
 
-    publishEvent('auth_events', 'auth.signup', { userId: user._id, email: user.email, name: user.name });
+    publishEvent("auth_events", "auth.signup", {
+      userId: user._id,
+      email: user.email,
+      name: user.name,
+    });
 
     res.status(201).json({
       message: "User created successfully",
       user: { id: user._id, email: user.email },
+      token,
     });
   } catch (error) {
     console.error("Signup error:", error.message);
@@ -66,11 +71,15 @@ router.post("/login", async (req, res) => {
       maxAge: 24 * 60 * 60 * 1000,
     });
 
-    publishEvent('auth_events', 'auth.login', { userId: user._id, email: user.email });
+    publishEvent("auth_events", "auth.login", {
+      userId: user._id,
+      email: user.email,
+    });
 
     res.json({
       message: "Login successful",
       user: { id: user._id, email: user.email },
+      token,
     });
   } catch (error) {
     console.error("Login error:", error.message);
@@ -85,7 +94,7 @@ router.post("/logout", (req, res) => {
     sameSite: "strict",
   });
 
-  publishEvent('auth_events', 'auth.logout', { timestamp: new Date() });
+  publishEvent("auth_events", "auth.logout", { timestamp: new Date() });
 
   res.json({ message: "Logged out successfully" });
 });
