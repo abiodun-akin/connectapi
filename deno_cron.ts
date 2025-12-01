@@ -1,4 +1,7 @@
-const RABBITMQ_HTTP_API = Deno.env.get("RABBITMQ_HTTP_API") || "";
+// RabbitMQ management HTTP API base (do not include trailing /api)
+// Default to localhost management port if not provided (useful for local testing)
+const RABBITMQ_HTTP_API =
+  Deno.env.get("RABBITMQ_HTTP_API") || "http://localhost:15672";
 const RABBITMQ_USER = Deno.env.get("RABBITMQ_USER") || "";
 const RABBITMQ_PASS = Deno.env.get("RABBITMQ_PASS") || "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
@@ -65,15 +68,29 @@ async function sendEmail(
 
 async function processMessages() {
   try {
+    if (!RABBITMQ_HTTP_API) throw new Error("RABBITMQ_HTTP_API must be set");
+    if (!RABBITMQ_USER || !RABBITMQ_PASS)
+      throw new Error("RABBITMQ_USER and RABBITMQ_PASS must be set");
+
     const auth = btoa(`${RABBITMQ_USER}:${RABBITMQ_PASS}`);
-    const apiUrl = RABBITMQ_HTTP_API.endsWith("/")
-      ? RABBITMQ_HTTP_API
-      : `${RABBITMQ_HTTP_API}/`;
+
+    // Ensure we call the management API under the /api path
+    const apiBase = RABBITMQ_HTTP_API.replace(/\/+$/g, "");
+    const apiUrl = apiBase.endsWith("/api") ? `${apiBase}/` : `${apiBase}/api/`;
+
+    // GET list of queues
     const response = await fetch(`${apiUrl}queues`, {
       headers: {
         Authorization: `Basic ${auth}`,
       },
     });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `RabbitMQ API returned ${response.status}: ${response.statusText} ${text}`
+      );
+    }
 
     const queues = (await response.json()) as Array<{ name: string }>;
     const targetQueues = ["auth_notifications", "payment_notifications"];
