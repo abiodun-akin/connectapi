@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: [true, "Fullnaame is required"],
-      validate: [validator.isAlpha, "Name must contain only letters"],
+      validate: [validator.String, "Name must contain only letters"],
       trim: true,
       escape: true,
     },
