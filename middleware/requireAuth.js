@@ -4,6 +4,8 @@ const requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(" ")[1] || req.cookies.jwt;
 
+  console.log(authHeader);
+
   if (!token) {
     return res.status(401).json({ error: "No token found" });
   }
