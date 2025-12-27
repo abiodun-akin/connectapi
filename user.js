@@ -7,7 +7,10 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: [true, "Fullnaame is required"],
-      validate: [validator.String, "Name must contain only letters"],
+      match: [
+        /^[A-Za-z]+([ '-][A-Za-z]+)*$/,
+        'Please enter a valid full name'
+      ],
       trim: true,
       escape: true,
     },
