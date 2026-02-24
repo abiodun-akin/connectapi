@@ -3,20 +3,22 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const User = require("../user");
 const { publishEvent } = require("../middleware/eventNotification");
+const { validateRequest, createValidationSchema } = require("../validators/inputValidator");
+const { AuthenticationError, ConflictError } = require("../errors/AppError");
 
 console.log("In auth routes");
 
-router.post("/signup", async (req, res) => {
-  const { name, email, password } = req.body || {};
+// Validation schemas
+const signupSchema = createValidationSchema("name", "email", "password");
+const loginSchema = createValidationSchema("email", "password");
 
-  if (!name || !email || !password) {
-    return res
-      .status(400)
-      .json({ error: "Name, email and password are required" });
-  }
+router.post("/signup", validateRequest(signupSchema), async (req, res, next) => {
+  const { name, email, password } = req.body;
 
   try {
     const user = await User.signup({ name, email, password });
+    user.lastLogin = new Date();
+    await user.save();
 
     const token = jwt.sign(
       { id: user._id },
@@ -43,20 +45,20 @@ router.post("/signup", async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error("Signup error:", error.message);
-    res.status(400).json({ error: error.message });
+    if (error.code === 11000) {
+      return next(new ConflictError("Email already registered"));
+    }
+    next(error);
   }
 });
 
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body || {};
-
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
-  }
+router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
+  const { email, password } = req.body;
 
   try {
     const user = await User.login({ email, password });
+    user.lastLogin = new Date();
+    await user.save();
 
     const token = jwt.sign(
       { id: user._id },
@@ -82,8 +84,7 @@ router.post("/login", async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error("Login error:", error.message);
-    res.status(401).json({ error: "Invalid email or password" });
+    next(new AuthenticationError("Invalid email or password"));
   }
 });
 

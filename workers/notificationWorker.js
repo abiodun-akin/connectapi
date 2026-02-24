@@ -5,52 +5,146 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
   process.env.RESEND_FROM_EMAIL || "noreply@kwezitechnologiesltd.africa";
 
+/**
+ * Enhanced email templates with actual content
+ */
 const emailTemplates = {
   "auth.signup": {
     subject: "Welcome to Farm Connect!",
-    html: "<h1>Welcome!</h1><p>Your account has been created successfully.</p>",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50;">Welcome to Farm Connect!</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "User"},</p>
+          <p style="color: #555; font-size: 16px;">
+            Your account has been created successfully. You can now log in and start exploring our platform.
+          </p>
+          <div style="margin: 30px 0; padding: 20px; background: #f9f9f9; border-left: 4px solid #27ae60;">
+            <p style="color: #555; margin: 0;">
+              <strong>Email:</strong> ${data.email}
+            </p>
+          </div>
+          <p style="color: #999; font-size: 14px; margin-top: 20px;">
+            If you didn't create this account, please ignore this email.
+          </p>
+        </div>
+      </div>
+    `,
   },
   "auth.login": {
     subject: "Login Successful",
-    html: "<h1>Login Successful</h1><p>You have logged in to your account.</p>",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50;">Login Successful</h1>
+          <p style="color: #555; font-size: 16px;">You have successfully logged in to your Farm Connect account.</p>
+          <p style="color: #999; font-size: 14px; margin-top: 20px;">
+            If this wasn't you, please change your password immediately.
+          </p>
+        </div>
+      </div>
+    `,
   },
   "auth.logout": {
     subject: "Logged Out",
-    html: "<h1>Logged Out</h1><p>You have been logged out.</p>",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50;">Logged Out</h1>
+          <p style="color: #555; font-size: 16px;">You have been logged out from your Farm Connect account.</p>
+        </div>
+      </div>
+    `,
   },
   "payment.initialized": {
-    subject: "Payment Started",
-    html: "<h1>Payment Started</h1><p>Your payment process has started.</p>",
+    subject: "Payment Started - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50;">Payment Started</h1>
+          <p style="color: #555; font-size: 16px;">Your payment process has been initiated.</p>
+          <div style="margin: 30px 0; padding: 20px; background: #f9f9f9; border-left: 4px solid #3498db;">
+            <p style="color: #555; margin: 5px 0;"><strong>Plan:</strong> ${data.plan}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Amount:</strong> ₦${data.amount.toLocaleString()}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Reference:</strong> ${data.reference}</p>
+          </div>
+        </div>
+      </div>
+    `,
   },
   "payment.verified": {
-    subject: "Payment Verified",
-    html: "<h1>Payment Verified</h1><p>Your payment has been verified.</p>",
+    subject: "Payment Verified - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50;">Payment Verified</h1>
+          <p style="color: #555; font-size: 16px;">Your payment has been verified successfully.</p>
+          <div style="margin: 30px 0; padding: 20px; background: #f9f9f9; border-left: 4px solid #27ae60;">
+            <p style="color: #555; margin: 5px 0;"><strong>Reference:</strong> ${data.reference}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Amount:</strong> ₦${data.amount.toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+    `,
   },
   "payment.success": {
-    subject: "Payment Successful",
-    html: "<h1>Payment Successful</h1><p>Your payment was completed successfully.</p>",
+    subject: "Subscription Activated - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #27ae60;">🎉 Subscription Activated!</h1>
+          <p style="color: #555; font-size: 16px;">Congratulations! Your subscription has been activated.</p>
+          <div style="margin: 30px 0; padding: 20px; background: #f0f7f4; border-left: 4px solid #27ae60; border-radius: 4px;">
+            <p style="color: #555; margin: 5px 0;"><strong>Plan:</strong> ${data.plan}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Amount:</strong> ₦${data.amount.toLocaleString()}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Active Until:</strong> ${new Date(data.subscriptionEndDate).toLocaleDateString()}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Reference:</strong> ${data.reference}</p>
+          </div>
+          <p style="color: #555; font-size: 16px; margin-top: 20px;">
+            You can now access all premium features. Thank you for your subscription!
+          </p>
+        </div>
+      </div>
+    `,
   },
   "payment.closed": {
-    subject: "Payment Cancelled",
-    html: "<h1>Payment Cancelled</h1><p>Your payment process was cancelled.</p>",
+    subject: "Payment Cancelled - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #e74c3c;">Payment Cancelled</h1>
+          <p style="color: #555; font-size: 16px;">Your payment process has been cancelled.</p>
+          <p style="color: #555; font-size: 16px; margin-top: 20px;">
+            If you need help, feel free to contact our support team.
+          </p>
+        </div>
+      </div>
+    `,
   },
 };
 
 const sendEmail = async (email, eventType, data) => {
   try {
     const template = emailTemplates[eventType];
-    if (!template) return;
+    if (!template) {
+      console.warn(`No email template found for event: ${eventType}`);
+      return;
+    }
+
+    const htmlContent = typeof template.html === 'function' 
+      ? template.html(data) 
+      : template.html;
 
     await resend.emails.send({
       from: senderEmail,
       to: email,
       subject: template.subject,
-      html: template.html,
+      html: htmlContent,
     });
 
-    console.log(`Email sent for ${eventType} to ${email}`);
+    console.log(`✓ Email sent for ${eventType} to ${email}`);
   } catch (error) {
-    console.error("Failed to send email:", error.message);
+    console.error(`✗ Failed to send email for ${eventType}:`, error.message);
   }
 };
 
@@ -74,25 +168,36 @@ const startWorker = async () => {
 
     channel.consume(authQueue.queue, async (msg) => {
       if (msg) {
-        const data = JSON.parse(msg.content.toString());
-        const eventType = msg.fields.routingKey;
-        await sendEmail(data.email, eventType, data);
-        channel.ack(msg);
+        try {
+          const data = JSON.parse(msg.content.toString());
+          const eventType = msg.fields.routingKey;
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
+        } catch (error) {
+          console.error("Error processing auth message:", error);
+          channel.nack(msg, false, true); // Requeue on error
+        }
       }
     });
 
     channel.consume(paymentQueue.queue, async (msg) => {
       if (msg) {
-        const data = JSON.parse(msg.content.toString());
-        const eventType = msg.fields.routingKey;
-        await sendEmail(data.email, eventType, data);
-        channel.ack(msg);
+        try {
+          const data = JSON.parse(msg.content.toString());
+          const eventType = msg.fields.routingKey;
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
+        } catch (error) {
+          console.error("Error processing payment message:", error);
+          channel.nack(msg, false, true); // Requeue on error
+        }
       }
     });
 
-    console.log("Notification worker started");
+    console.log("✓ Notification worker started and listening for events");
   } catch (error) {
-    console.error("Worker failed:", error);
+    console.error("✗ Worker failed:", error.message);
+    console.log("Retrying in 5 seconds...");
     setTimeout(startWorker, 5000);
   }
 };

@@ -31,6 +31,39 @@ const userSchema = new mongoose.Schema(
       escape: true,
       select: false,
     },
+    // Admin status
+    isAdmin: {
+      type: Boolean,
+      default: false,
+    },
+    // Account suspension
+    isSuspended: {
+      type: Boolean,
+      default: false,
+    },
+    suspensionReason: String,
+    suspensionDate: Date,
+    // Violation tracking
+    violationCount: {
+      type: Number,
+      default: 0,
+    },
+    violationHistory: [
+      {
+        type: String,
+        timestamp: Date,
+      },
+    ],
+    flaggedMessageCount: {
+      type: Number,
+      default: 0,
+    },
+    abuseReportCount: {
+      type: Number,
+      default: 0,
+    },
+    // Last login tracking
+    lastLogin: Date,
   },
   {
     timestamps: true,

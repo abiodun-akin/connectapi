@@ -1,0 +1,217 @@
+const express = require("express");
+const router = express.Router();
+const UserProfile = require("../userProfile");
+const Subscription = require("../subscription");
+const { validateRequest, validationRules } = require("../validators/inputValidator");
+const { ValidationError, NotFoundError } = require("../errors/AppError");
+
+/**
+ * POST /api/profile/initialize
+ * Initialize user profile (choose farmer or vendor)
+ */
+router.post("/initialize", async (req, res, next) => {
+  const { profileType } = req.body;
+
+  try {
+    if (!["farmer", "vendor"].includes(profileType)) {
+      throw new ValidationError("Profile type must be farmer or vendor", "profileType");
+    }
+
+    const existingProfile = await UserProfile.getUserProfile(req.user._id);
+    if (existingProfile && existingProfile.isProfileComplete) {
+      return res.status(400).json({
+        error: "Profile already completed",
+        code: "PROFILE_ALREADY_COMPLETE",
+      });
+    }
+
+    const profile = await UserProfile.create({
+      user_id: req.user._id,
+      profileType,
+    });
+
+    res.json({
+      message: "Profile type selected",
+      profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/profile/farmer
+ * Complete farmer profile
+ */
+router.post("/farmer", async (req, res, next) => {
+  const farmerData = req.body;
+
+  try {
+    const requiredFields = [
+      "phone",
+      "location",
+      "farmingAreas",
+      "cropsProduced",
+      "yearsOfExperience",
+      "interests",
+    ];
+
+    for (const field of requiredFields) {
+      if (!farmerData.farmerDetails?.[field]) {
+        throw new ValidationError(`${field} is required`, field);
+      }
+    }
+
+    const profile = await UserProfile.updateFarmerProfile(req.user._id, {
+      phone: farmerData.phone,
+      location: farmerData.location,
+      state: farmerData.state,
+      lga: farmerData.lga,
+      bio: farmerData.bio,
+      farmerDetails: farmerData.farmerDetails,
+    });
+
+    res.json({
+      message: "Farmer profile completed successfully",
+      profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/profile/vendor
+ * Complete vendor profile
+ */
+router.post("/vendor", async (req, res, next) => {
+  const vendorData = req.body;
+
+  try {
+    const requiredFields = [
+      "phone",
+      "location",
+      "businessType",
+      "servicesOffered",
+      "yearsInBusiness",
+      "interests",
+    ];
+
+    for (const field of requiredFields) {
+      if (!vendorData.vendorDetails?.[field]) {
+        throw new ValidationError(`${field} is required`, field);
+      }
+    }
+
+    const profile = await UserProfile.updateVendorProfile(req.user._id, {
+      phone: vendorData.phone,
+      location: vendorData.location,
+      state: vendorData.state,
+      bio: vendorData.bio,
+      vendorDetails: vendorData.vendorDetails,
+    });
+
+    res.json({
+      message: "Vendor profile completed successfully",
+      profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/profile
+ * Get current user's profile
+ */
+router.get("/", async (req, res, next) => {
+  try {
+    const profile = await UserProfile.getUserProfile(req.user._id);
+
+    if (!profile) {
+      return res.json({
+        profile: null,
+        isProfileComplete: false,
+        message: "Profile not started",
+      });
+    }
+
+    // Determine if profile completion is required
+    const subscription = await Subscription.findOne({
+      user_id: req.user._id,
+      status: { $in: ["active", "trial"] },
+    });
+
+    res.json({
+      profile,
+      isProfileComplete: profile.isProfileComplete,
+      requiresCompletion: subscription && !profile.isProfileComplete,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/profile/:userId
+ * Get public profile of another user
+ */
+router.get("/:userId", async (req, res, next) => {
+  try {
+    const profile = await UserProfile.findOne({ user_id: req.params.userId });
+
+    if (!profile) {
+      return next(new NotFoundError("User profile"));
+    }
+
+    // Don't send sensitive data
+    const publicProfile = {
+      _id: profile._id,
+      profileType: profile.profileType,
+      location: profile.location,
+      state: profile.state,
+      bio: profile.bio,
+      createdAt: profile.createdAt,
+      ...(profile.profileType === "farmer" && {
+        farmingAreas: profile.farmerDetails?.farmingAreas,
+        cropsProduced: profile.farmerDetails?.cropsProduced,
+        yearsOfExperience: profile.farmerDetails?.yearsOfExperience,
+      }),
+      ...(profile.profileType === "vendor" && {
+        businessType: profile.vendorDetails?.businessType,
+        servicesOffered: profile.vendorDetails?.servicesOffered,
+      }),
+    };
+
+    res.json(publicProfile);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/profile
+ * Update user profile
+ */
+router.put("/", async (req, res, next) => {
+  try {
+    const profile = await UserProfile.findOneAndUpdate(
+      { user_id: req.user._id },
+      req.body,
+      { new: true }
+    );
+
+    if (!profile) {
+      return next(new NotFoundError("User profile"));
+    }
+
+    res.json({
+      message: "Profile updated successfully",
+      profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
