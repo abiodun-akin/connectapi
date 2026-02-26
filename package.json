@@ -16,6 +16,7 @@
   "type": "commonjs",
   "dependencies": {
     "amqplib": "^0.10.4",
+    "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

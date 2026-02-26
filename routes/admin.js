@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const User = require("../user");
 const Message = require("../message");
+const Subscription = require("../subscription");
 const {
   suspendUserAccount,
   unsuspendUserAccount,
@@ -34,18 +35,26 @@ router.use(verifyAdmin);
  * List all users with activity scores and violation info
  */
 router.get("/users", async (req, res, next) => {
-  const { limit = 20, page = 1, sortBy = "createdAt" } = req.query;
+  const { limit = 20, page = 1, sortBy = "createdAt", search } = req.query;
 
   try {
     const skip = (page - 1) * limit;
 
-    const users = await User.find()
+    const query = {};
+    if (search) {
+      query.$or = [
+        { email: { $regex: search, $options: "i" } },
+        { name: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const users = await User.find(query)
       .select("-password")
       .limit(parseInt(limit))
       .skip(skip)
       .sort({ [sortBy]: -1 });
 
-    const total = await User.countDocuments();
+    const total = await User.countDocuments(query);
 
     // Get activity reports for each user
     const usersWithScores = await Promise.all(
@@ -218,15 +227,15 @@ router.get("/violations", async (req, res, next) => {
     let users = [];
     let total = 0;
 
-    if (type === "all" || type === "payment") {
+    const collectPaymentViolations = async () => {
       const violationUsers = await User.find({
         violationCount: { $gt: 0 },
       })
-        .select("email violation* flaggedMessageCount")
+        .select("email violationCount flaggedMessageCount isSuspended")
         .limit(parseInt(limit))
         .skip(skip);
 
-      users = violationUsers.map((u) => ({
+      return violationUsers.map((u) => ({
         _id: u._id,
         email: u.email,
         violationType: "payment",
@@ -234,49 +243,72 @@ router.get("/violations", async (req, res, next) => {
         flaggedMessages: u.flaggedMessageCount || 0,
         isSuspended: u.isSuspended,
       }));
+    };
 
-      total = await User.countDocuments({ violationCount: { $gt: 0 } });
-    }
-
-    if (type === "all" || type === "flagged_messages") {
+    const collectFlaggedMessageViolations = async () => {
       const flaggedUsers = await User.find({ flaggedMessageCount: { $gt: 0 } })
-        .select("email flaggedMessage* violeationCount")
+        .select("email flaggedMessageCount violationCount isSuspended")
         .limit(parseInt(limit))
         .skip(skip);
 
-      if (type === "flagged_messages") {
-        users = flaggedUsers.map((u) => ({
-          _id: u._id,
-          email: u.email,
-          violationType: "flaggedMessages",
-          flaggedMessageCount: u.flaggedMessageCount || 0,
-          paymentViolations: u.violationCount || 0,
-          isSuspended: u.isSuspended,
-        }));
+      return flaggedUsers.map((u) => ({
+        _id: u._id,
+        email: u.email,
+        violationType: "flaggedMessages",
+        flaggedMessageCount: u.flaggedMessageCount || 0,
+        paymentViolations: u.violationCount || 0,
+        isSuspended: u.isSuspended,
+      }));
+    };
 
+    const collectSuspensions = async () => {
+      const suspendedUsers = await User.find({ isSuspended: true })
+        .select(
+          "email suspensionReason suspensionDate violationCount flaggedMessageCount"
+        )
+        .limit(parseInt(limit))
+        .skip(skip);
+
+      return suspendedUsers.map((u) => ({
+        _id: u._id,
+        email: u.email,
+        violationType: "suspension",
+        suspensionReason: u.suspensionReason,
+        suspensionDate: u.suspensionDate,
+        violationCount: u.violationCount || 0,
+        flaggedMessageCount: u.flaggedMessageCount || 0,
+      }));
+    };
+
+    if (type === "all" || type === "payment") {
+      users = users.concat(await collectPaymentViolations());
+      total += await User.countDocuments({ violationCount: { $gt: 0 } });
+    }
+
+    if (type === "all" || type === "flagged_messages") {
+      const flaggedResults = await collectFlaggedMessageViolations();
+      if (type === "flagged_messages") {
+        users = flaggedResults;
         total = await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
+      } else {
+        users = users.concat(flaggedResults);
+        total += await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
       }
     }
 
     if (type === "all" || type === "suspended") {
-      const suspendedUsers = await User.find({ isSuspended: true })
-        .select("email suspensionReason suspensionDate violation* flaggedMessage*")
-        .limit(parseInt(limit))
-        .skip(skip);
-
+      const suspendedResults = await collectSuspensions();
       if (type === "suspended") {
-        users = suspendedUsers.map((u) => ({
-          _id: u._id,
-          email: u.email,
-          violationType: "suspension",
-          suspensionReason: u.suspensionReason,
-          suspensionDate: u.suspensionDate,
-          violationCount: u.violationCount || 0,
-          flaggedMessageCount: u.flaggedMessageCount || 0,
-        }));
-
+        users = suspendedResults;
         total = await User.countDocuments({ isSuspended: true });
+      } else {
+        users = users.concat(suspendedResults);
+        total += await User.countDocuments({ isSuspended: true });
       }
+    }
+
+    if (type === "all") {
+      users = users.slice(skip, skip + parseInt(limit));
     }
 
     res.json({
@@ -357,6 +389,87 @@ router.get("/dashboard", async (req, res, next) => {
       risks: {
         highRiskUsers: usersWithViolations + suspendedUsers,
         weeklyFlaggedMessages: recentlyFlaggedMessages,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/messages/flagged
+ * List flagged messages for review
+ */
+router.get("/messages/flagged", async (req, res, next) => {
+  const { limit = 20, page = 1 } = req.query;
+
+  try {
+    const skip = (page - 1) * limit;
+    const messages = await Message.find({ status: "flagged" })
+      .populate("sender_id", "email")
+      .populate("recipient_id", "email")
+      .populate("match_id")
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await Message.countDocuments({ status: "flagged" });
+
+    res.json({
+      messages: messages.map((msg) => ({
+        _id: msg._id,
+        sender: msg.sender_id?.email,
+        recipient: msg.recipient_id?.email,
+        content: msg.content,
+        flagReason: msg.flagReason,
+        status: msg.status,
+        aiAnalysisResult: msg.aiAnalysisResult,
+        createdAt: msg.createdAt,
+      })),
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/subscriptions/cancelled
+ * List cancelled subscriptions with reasons
+ */
+router.get("/subscriptions/cancelled", async (req, res, next) => {
+  const { limit = 20, page = 1 } = req.query;
+
+  try {
+    const skip = (page - 1) * limit;
+    const subscriptions = await Subscription.find({ status: "cancelled" })
+      .populate("user_id", "email")
+      .sort({ updatedAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await Subscription.countDocuments({ status: "cancelled" });
+
+    res.json({
+      subscriptions: subscriptions.map((sub) => ({
+        _id: sub._id,
+        userId: sub.user_id?._id,
+        email: sub.user_id?.email,
+        plan: sub.plan,
+        amount: sub.amount,
+        cancellationReason: sub.cancellationReason,
+        updatedAt: sub.updatedAt,
+      })),
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (error) {

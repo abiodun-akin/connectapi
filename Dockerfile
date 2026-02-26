@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────
 # Builder stage – installs everything (including native deps)
 # ──────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20.11-alpine AS builder
 
 # Install only what's needed for native module compilation
 # (Alpine uses apk, not apt-get)
@@ -18,7 +18,7 @@ WORKDIR /home/node/app
 COPY package*.json ./
 
 # Install ALL dependencies (including devDependencies needed for build)
-RUN npm ci --include=dev
+RUN npm install
 
 # Copy source code
 COPY . .
@@ -29,7 +29,7 @@ COPY . .
 # ──────────────────────────────────────────────────────────────
 # Final production image – tiny & secure
 # ──────────────────────────────────────────────────────────────
-FROM node:20-alpine AS production
+FROM node:20.11-alpine AS production
 
 # Create non-root user (already exists in node:alpine, but we make it explicit)
 USER node

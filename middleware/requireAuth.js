@@ -1,7 +1,8 @@
 const jwt = require("jsonwebtoken");
+const User = require("../user");
 const { AuthenticationError, AuthorizationError } = require("../errors/AppError");
 
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.split(" ")[1] || req.cookies.jwt;
 
@@ -12,20 +13,40 @@ const requireAuth = (req, res, next) => {
     return next(new AuthenticationError("No authentication token provided"));
   }
 
-  jwt.verify(token, process.env.TOKEN_SECRET || "fallback-secret-for-dev-only", (err, decodedToken) => {
-    if (err) {
-      console.log("JWT verification error:", err.message);
-      
-      if (err.name === "TokenExpiredError") {
-        return next(new AuthorizationError("Token has expired. Please login again."));
-      }
-      
-      return next(new AuthenticationError("Invalid authentication token"));
+  let decodedToken;
+  try {
+    decodedToken = jwt.verify(
+      token,
+      process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
+    );
+  } catch (err) {
+    console.log("JWT verification error:", err.message);
+
+    if (err.name === "TokenExpiredError") {
+      return next(new AuthorizationError("Token has expired. Please login again."));
     }
 
-    req.user = decodedToken;
+    return next(new AuthenticationError("Invalid authentication token"));
+  }
+
+  try {
+    const user = await User.findById(decodedToken.id).select(
+      "email isAdmin isSuspended suspensionReason"
+    );
+
+    if (!user) {
+      return next(new AuthenticationError("User not found"));
+    }
+
+    if (user.isSuspended) {
+      return next(new AuthorizationError("Account suspended"));
+    }
+
+    req.user = user;
     next();
-  });
+  } catch (error) {
+    next(error);
+  }
 };
 
 module.exports = requireAuth;

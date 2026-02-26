@@ -41,7 +41,12 @@ router.post("/signup", validateRequest(signupSchema), async (req, res, next) => 
 
     res.status(201).json({
       message: "User created successfully",
-      user: { id: user._id, email: user.email },
+      user: {
+        id: user._id,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isSuspended: user.isSuspended,
+      },
       token,
     });
   } catch (error) {
@@ -80,7 +85,12 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
 
     res.json({
       message: "Login successful",
-      user: { id: user._id, email: user.email },
+      user: {
+        id: user._id,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        isSuspended: user.isSuspended,
+      },
       token,
     });
   } catch (error) {
