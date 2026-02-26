@@ -24,6 +24,11 @@ const verifyPaymentSchema = {
   plan: validationRules.plan,
 };
 
+// Success schema
+const successPaymentSchema = {
+  plan: validationRules.plan,
+};
+
 /**
  * POST /api/payment/initialize
  * Create a payment record and initialize payment
@@ -144,7 +149,7 @@ router.post(
  */
 router.post(
   "/success",
-  validateRequest(verifyPaymentSchema),
+  validateRequest(successPaymentSchema),
   async (req, res, next) => {
     const { reference, plan } = req.body;
 
