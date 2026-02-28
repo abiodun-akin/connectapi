@@ -1,0 +1,386 @@
+version: '3.8'version: '3.9'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    restart: unless-stopped      - mongodb    depends_on:      - "8081:8081"    ports:      - farmconnect-dev    networks:      ME_CONFIG_BASICAUTH_PASSWORD: pass      ME_CONFIG_BASICAUTH_USERNAME: admin      ME_CONFIG_MONGODB_PORT: 27017      ME_CONFIG_MONGODB_SERVER: mongodb      ME_CONFIG_MONGODB_ADMINPASSWORD: connectapi      ME_CONFIG_MONGODB_ADMINUSERNAME: connectapi    environment:    container_name: connectapi-mongo-express-dev    image: mongo-express:latest  mongo-express:  # ==================  # Mongo Express (DEV)  # ==================    restart: unless-stopped        condition: service_started      connectapi:    depends_on:    command: npm run cron      - farmconnect-dev    networks:      - /home/node/app/node_modules      - ./:/home/node/app    volumes:      - CRON_SECRET=dev-cron-secret      - JWT_SECRET=dev-secret-key-change-in-production      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb_dev?authSource=admin      - NODE_ENV=development    environment:    working_dir: /home/node/app    user: "node"    container_name: connectapi-cron-dev      target: development      dockerfile: Dockerfile.dev      context: .    build:  cron-worker:  # ==================  # Cron Job Worker (DEV)  # ==================    restart: unless-stopped        condition: service_healthy      rabbitmq:        condition: service_started      connectapi:    depends_on:    command: npm run worker      - farmconnect-dev    networks:      - /home/node/app/node_modules      - ./:/home/node/app    volumes:      - JWT_SECRET=dev-secret-key-change-in-production      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb_dev?authSource=admin      - RESEND_API_KEY=${RESEND_API_KEY:-test_key}      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672      - NODE_ENV=development    environment:    working_dir: /home/node/app    user: "node"    container_name: connectapi-worker-dev      target: development      dockerfile: Dockerfile.dev      context: .    build:  notification-worker:  # ==================  # Notification Worker (DEV)  # ==================    restart: unless-stopped        condition: service_healthy      rabbitmq:        condition: service_healthy      mongodb:    depends_on:    command: npm run dev      - "8888:8888"    ports:      - farmconnect-dev    networks:      - /home/node/app/node_modules      - ./:/home/node/app    volumes:      - CRON_SECRET=dev-cron-secret      - RESEND_API_KEY=${RESEND_API_KEY:-test_key}      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672      - JWT_SECRET=dev-secret-key-change-in-production      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb_dev?authSource=admin      - NODE_ENV=development      - PORT=8888    environment:    working_dir: /home/node/app    user: "node"    container_name: connectapi-server-dev      target: development      dockerfile: Dockerfile.dev      context: .    build:  connectapi:  # ==================  # Connect API Server (DEV)  # ==================    restart: unless-stopped      retries: 5      timeout: 10s      interval: 30s      test: rabbitmq-diagnostics -q ping    healthcheck:      - "15672:15672" # Management UI      - "5672:5672"   # AMQP    ports:      - farmconnect-dev    networks:      - rabbitmq_dev_data:/var/lib/rabbitmq    volumes:      RABBITMQ_DEFAULT_PASS: guest      RABBITMQ_DEFAULT_USER: guest    environment:    container_name: connectapi-rabbitmq-dev    image: rabbitmq:3.12-management-alpine  rabbitmq:  # ==================  # RabbitMQ (Local - DEV)  # ==================      retries: 5      timeout: 5s      interval: 10s      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet    healthcheck:    restart: unless-stopped      - "27017:27017"    ports:      - farmconnect-dev    networks:      - mongo_dev_data:/data/db    volumes:      MONGO_INITDB_DATABASE: connectdb_dev      MONGO_INITDB_ROOT_PASSWORD: connectapi      MONGO_INITDB_ROOT_USERNAME: connectapi    environment:    container_name: connectapi-mongodb-dev    image: mongo:6.0  mongodb:  # ==================  # MongoDB Database (DEV)  # ==================services:    driver: local  rabbitmq_dev_data:    driver: local  mongo_dev_data:volumes:    driver: bridge  farmconnect-dev:networks:
+networks:
+  farmconnect-dev:
+    driver: bridge
+
+volumes:
+  mongo_data_dev:
+    driver: local
+  rabbitmq_data_dev:
+    driver: local
+
+services:
+  # ==================
+  # MongoDB Database (Development)
+  # ==================
+  mongodb:
+    image: mongo:6.0-alpine
+    container_name: farmconnect-mongodb-dev
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: connectapi
+      MONGO_INITDB_ROOT_PASSWORD: connectapi
+      MONGO_INITDB_DATABASE: connectdb
+    volumes:
+      - mongo_data_dev:/data/db
+    networks:
+      - farmconnect-dev
+    ports:
+      - "27017:27017"
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================
+  # Mongo Express (DB Admin)
+  # ==================
+  mongo-express:
+    image: mongo-express:latest
+    container_name: farmconnect-mongo-express-dev
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: connectapi
+      ME_CONFIG_MONGODB_ADMINPASSWORD: connectapi
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: pass
+    ports:
+      - "8081:8081"
+    networks:
+      - farmconnect-dev
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+  # ==================
+  # RabbitMQ Message Queue (Development)
+  # ==================
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: farmconnect-rabbitmq-dev
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data_dev:/var/lib/rabbitmq
+    networks:
+      - farmconnect-dev
+    ports:
+      - "5672:5672"    # AMQP port
+      - "15672:15672"  # Management UI
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================
+  # Main API Service
+  # ==================
+  connectapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: connectapi-dev
+    user: "node"
+    working_dir: /home/node/app
+    environment:
+      - PORT=8888
+      - NODE_ENV=development
+      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-key-change-in-production}
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - CRON_SECRET=${CRON_SECRET:-dev-cron-secret}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:5173}
+      - LOG_LEVEL=debug
+    volumes:
+      - ./:/home/node/app
+      - /home/node/app/node_modules
+    networks:
+      - farmconnect-dev
+    ports:
+      - "8888:8888"
+    command: npm run dev
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: wget -qO- http://localhost:8888/health || exit 1
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  # ==================
+  # Notification Worker
+  # ==================
+  notification-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: notification-worker-dev
+    user: "node"
+    working_dir: /home/node/app
+    environment:
+      - NODE_ENV=development
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin
+      - LOG_LEVEL=debug
+    volumes:
+      - ./:/home/node/app
+      - /home/node/app/node_modules
+    networks:
+      - farmconnect-dev
+    command: npm run worker
+    depends_on:
+      connectapi:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - worker
+
+  # ==================
+  # Cron Job Worker
+  # ==================
+  cron-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: cron-worker-dev
+    user: "node"
+    working_dir: /home/node/app
+    environment:
+      - NODE_ENV=development
+      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin
+      - CRON_SECRET=${CRON_SECRET:-dev-cron-secret}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
+      - LOG_LEVEL=debug
+    volumes:
+      - ./:/home/node/app
+      - /home/node/app/node_modules
+    networks:
+      - farmconnect-dev
+    command: npm run cron
+    depends_on:
+      connectapi:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - worker
+
+  # ==================
+  # Test Service (optional)
+  # ==================
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: connectapi-test
+    user: "node"
+    working_dir: /home/node/app
+    environment:
+      - NODE_ENV=test
+      - CONN_STR=mongodb://connectapi:connectapi@mongodb:27017/connectdb?authSource=admin
+      - JWT_SECRET=test-secret
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    volumes:
+      - ./:/home/node/app
+      - /home/node/app/node_modules
+    networks:
+      - farmconnect-dev
+    command: npm run test:cov
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    profiles:
+      - test

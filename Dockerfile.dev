@@ -1,0 +1,34 @@
+# ──────────────────────────────────────────────────────────────
+# Development Docker image for ConnectAPI
+# ──────────────────────────────────────────────────────────────
+FROM node:20.11-alpine
+
+WORKDIR /home/node/app
+
+# Install development tools
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    curl \
+    wget \
+    git
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev)
+RUN npm install
+
+# Copy source code
+COPY . .
+
+# Expose port
+EXPOSE 8888
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost:8888/health || exit 1
+
+# Default command for development (nodemon)
+CMD ["npm", "run", "dev"]
