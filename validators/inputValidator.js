@@ -123,6 +123,15 @@ const validationRules = {
       );
     }
   },
+
+  reference: (reference) => {
+    if (!reference || typeof reference !== 'string') {
+      throw new ValidationError('Payment reference is required', 'reference');
+    }
+    if (reference.trim().length < 5) {
+      throw new ValidationError('Invalid payment reference format', 'reference');
+    }
+  },
 };
 
 /**

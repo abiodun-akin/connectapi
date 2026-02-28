@@ -21,11 +21,13 @@ const initializePaymentSchema = {
 
 // Verification schema
 const verifyPaymentSchema = {
+  reference: validationRules.reference,
   plan: validationRules.plan,
 };
 
 // Success schema
 const successPaymentSchema = {
+  reference: validationRules.reference,
   plan: validationRules.plan,
 };
 
