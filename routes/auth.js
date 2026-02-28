@@ -29,7 +29,7 @@ router.post("/signup", validateRequest(signupSchema), async (req, res, next) => 
     res.cookie("jwt", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -74,7 +74,7 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
     res.cookie("jwt", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -102,7 +102,7 @@ router.post("/logout", (req, res) => {
   res.cookie("jwt", "", {
     httpOnly: true,
     maxAge: 0,
-    sameSite: "strict",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
 
   publishEvent("auth_events", "auth.logout", { timestamp: new Date() });
