@@ -8,7 +8,7 @@ module.exports = {
     '!jest.config.js',
     '!index.js',
   ],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
       branches: 70,
       functions: 70,

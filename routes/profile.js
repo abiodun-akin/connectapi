@@ -18,6 +18,8 @@ router.post("/initialize", async (req, res, next) => {
     }
 
     const existingProfile = await UserProfile.getUserProfile(req.user._id);
+    
+    // If profile is already complete, don't allow re-initialization
     if (existingProfile && existingProfile.isProfileComplete) {
       return res.status(400).json({
         error: "Profile already completed",
@@ -25,10 +27,22 @@ router.post("/initialize", async (req, res, next) => {
       });
     }
 
-    const profile = await UserProfile.create({
-      user_id: req.user._id,
-      profileType,
-    });
+    let profile;
+    
+    // If profile exists but incomplete, update it
+    if (existingProfile) {
+      profile = await UserProfile.findOneAndUpdate(
+        { user_id: req.user._id },
+        { profileType },
+        { new: true }
+      );
+    } else {
+      // Create new profile
+      profile = await UserProfile.create({
+        user_id: req.user._id,
+        profileType,
+      });
+    }
 
     res.json({
       message: "Profile type selected",
