@@ -25,6 +25,8 @@ const userProfileSchema = new mongoose.Schema(
     location: String,
     state: String,
     lga: String, // Local Government Area (for Nigeria)
+    latitude: String,
+    longitude: String,
     bio: String,
     profileImageUrl: String,
 
@@ -37,6 +39,7 @@ const userProfileSchema = new mongoose.Schema(
       yearsOfExperience: String, // Dropdown: <1 year, 1-3 years, 3-5 years, >5 years
       certifications: [String], // Dropdown: Organic, Fair Trade, etc.
       interests: [String], // Dropdown: Funding, Partnership, Market access, Technology, Training, etc.
+      otherInterests: String, // Custom interests when "Other" is selected
       productionCapacity: String, // Dropdown: Low, Medium, High
       seekingCollaboration: Boolean,
       seekingFunding: Boolean,
@@ -51,6 +54,7 @@ const userProfileSchema = new mongoose.Schema(
       yearsInBusiness: String, // Dropdown: <1 year, 1-3 years, 3-5 years, >5 years
       certifications: [String], // Dropdown: ISO certified, Government registered, etc.
       interests: [String], // Dropdown: Farmer partnerships, Bulk supply, Equipment sales, Service contracts, etc.
+      otherInterests: String, // Custom interests when "Other" is selected
       operatingAreas: [String], // States they operate in
       businessRegistration: String,
       businessLicense: String,
