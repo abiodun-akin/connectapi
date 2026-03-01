@@ -61,17 +61,28 @@ router.post("/farmer", async (req, res, next) => {
   const farmerData = req.body;
 
   try {
-    const requiredFields = [
-      "phone",
-      "location",
+    // Validate top-level required fields
+    if (!farmerData.phone) {
+      throw new ValidationError("phone is required", "phone");
+    }
+    if (!farmerData.location) {
+      throw new ValidationError("location is required", "location");
+    }
+    if (!farmerData.state) {
+      throw new ValidationError("state is required", "state");
+    }
+
+    // Validate nested farmerDetails fields
+    const requiredNestedFields = [
       "farmingAreas",
       "cropsProduced",
       "yearsOfExperience",
       "interests",
     ];
 
-    for (const field of requiredFields) {
-      if (!farmerData.farmerDetails?.[field]) {
+    for (const field of requiredNestedFields) {
+      if (!farmerData.farmerDetails?.[field] || 
+          (Array.isArray(farmerData.farmerDetails[field]) && farmerData.farmerDetails[field].length === 0)) {
         throw new ValidationError(`${field} is required`, field);
       }
     }
@@ -81,6 +92,8 @@ router.post("/farmer", async (req, res, next) => {
       location: farmerData.location,
       state: farmerData.state,
       lga: farmerData.lga,
+      latitude: farmerData.latitude,
+      longitude: farmerData.longitude,
       bio: farmerData.bio,
       farmerDetails: farmerData.farmerDetails,
     });
@@ -102,17 +115,28 @@ router.post("/vendor", async (req, res, next) => {
   const vendorData = req.body;
 
   try {
-    const requiredFields = [
-      "phone",
-      "location",
+    // Validate top-level required fields
+    if (!vendorData.phone) {
+      throw new ValidationError("phone is required", "phone");
+    }
+    if (!vendorData.location) {
+      throw new ValidationError("location is required", "location");
+    }
+    if (!vendorData.state) {
+      throw new ValidationError("state is required", "state");
+    }
+
+    // Validate nested vendorDetails fields
+    const requiredNestedFields = [
       "businessType",
       "servicesOffered",
       "yearsInBusiness",
       "interests",
     ];
 
-    for (const field of requiredFields) {
-      if (!vendorData.vendorDetails?.[field]) {
+    for (const field of requiredNestedFields) {
+      if (!vendorData.vendorDetails?.[field] ||
+          (Array.isArray(vendorData.vendorDetails[field]) && vendorData.vendorDetails[field].length === 0)) {
         throw new ValidationError(`${field} is required`, field);
       }
     }
@@ -121,6 +145,9 @@ router.post("/vendor", async (req, res, next) => {
       phone: vendorData.phone,
       location: vendorData.location,
       state: vendorData.state,
+      lga: vendorData.lga,
+      latitude: vendorData.latitude,
+      longitude: vendorData.longitude,
       bio: vendorData.bio,
       vendorDetails: vendorData.vendorDetails,
     });
