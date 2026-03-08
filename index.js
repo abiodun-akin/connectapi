@@ -33,6 +33,19 @@ const { NotFoundError, ValidationError } = require("./errors/AppError");
 const app = express();
 const PORT = process.env.PORT || 8888;
 
+const normalizeOrigin = (value) => {
+  if (!value) return "";
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  // Render host values are sometimes provided without protocol.
+  return `https://${trimmed}`;
+};
+
 const getAllowedOrigins = () => {
   const configuredOrigins = [
     process.env.FRONTEND_ORIGINS,
@@ -40,7 +53,7 @@ const getAllowedOrigins = () => {
   ]
     .filter(Boolean)
     .flatMap((value) => value.split(","))
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin))
     .filter(Boolean);
 
   if (configuredOrigins.length > 0) {
@@ -54,15 +67,13 @@ const allowedOrigins = getAllowedOrigins();
 const isOriginAllowed = (origin) => {
   // Allow non-browser requests (curl, server-to-server) without Origin header.
   if (!origin) return true;
-  return allowedOrigins.includes(origin);
+
+  const normalizedRequestOrigin = normalizeOrigin(origin);
+  return allowedOrigins.includes(normalizedRequestOrigin);
 };
 
 const corsOriginHandler = (origin, callback) => {
-  if (isOriginAllowed(origin)) {
-    return callback(null, true);
-  }
-
-  return callback(new Error("Not allowed by CORS"));
+  return callback(null, isOriginAllowed(origin));
 };
 
 const server = http.createServer(app);
