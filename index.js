@@ -32,10 +32,43 @@ const { NotFoundError, ValidationError } = require("./errors/AppError");
 
 const app = express();
 const PORT = process.env.PORT || 8888;
+
+const getAllowedOrigins = () => {
+  const configuredOrigins = [
+    process.env.FRONTEND_ORIGINS,
+    process.env.FRONTEND_ORIGIN,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => value.split(","))
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (configuredOrigins.length > 0) {
+    return [...new Set(configuredOrigins)];
+  }
+
+  return ["http://localhost:5173"];
+};
+
+const allowedOrigins = getAllowedOrigins();
+const isOriginAllowed = (origin) => {
+  // Allow non-browser requests (curl, server-to-server) without Origin header.
+  if (!origin) return true;
+  return allowedOrigins.includes(origin);
+};
+
+const corsOriginHandler = (origin, callback) => {
+  if (isOriginAllowed(origin)) {
+    return callback(null, true);
+  }
+
+  return callback(new Error("Not allowed by CORS"));
+};
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    origin: corsOriginHandler,
     credentials: true,
   },
 });
@@ -56,7 +89,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    origin: corsOriginHandler,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
