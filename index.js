@@ -1,8 +1,11 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const { Server } = require("socket.io");
 
 const userRoutes = require("./routes/auth");
 const paymentRoutes = require("./routes/payment");
@@ -10,10 +13,14 @@ const profileRoutes = require("./routes/profile");
 const matchesRoutes = require("./routes/matches");
 const messagesRoutes = require("./routes/messages");
 const adminRoutes = require("./routes/admin");
+const adminAgentsRoutes = require("./routes/adminAgents");
+const agentsRoutes = require("./routes/agents");
 const cronRoutes = require("./routes/cron");
 const requireAuth = require("./middleware/requireAuth");
 const getreport = require("./middleware/getreport");
 const errorHandler = require("./middleware/errorHandler");
+const Match = require("./match");
+const Message = require("./message");
 const {
   initializeRabbitMQ,
   eventNotificationMiddleware,
@@ -25,6 +32,13 @@ const { NotFoundError, ValidationError } = require("./errors/AppError");
 
 const app = express();
 const PORT = process.env.PORT || 8888;
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    credentials: true,
+  },
+});
 
 // Security middleware
 app.use((req, res, next) => {
@@ -51,6 +65,10 @@ app.use(
 
 app.use(eventNotificationMiddleware);
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 // Validation schemas for reports
 const createReportSchema = createValidationSchema("title", "location", "description");
 const updateReportSchema = createValidationSchema("title", "location", "description");
@@ -75,6 +93,10 @@ app.use("/api/messages", requireAuth, messagesRoutes);
 
 // Admin routes (require authentication and admin status)
 app.use("/api/admin", requireAuth, adminRoutes);
+app.use("/api/admin/agents", requireAuth, adminAgentsRoutes);
+
+// Agent routes (require authentication)
+app.use("/api/agents", requireAuth, agentsRoutes);
 
 // Report routes (require authentication)
 app.use(requireAuth);
@@ -153,6 +175,92 @@ app.use((req, res) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
+io.use((socket, next) => {
+  try {
+    const tokenFromAuth = socket.handshake.auth?.token;
+    const authHeader = socket.handshake.headers?.authorization;
+    const tokenFromHeader = authHeader?.split(" ")[1];
+    const token = tokenFromAuth || tokenFromHeader;
+
+    if (!token) {
+      return next(new Error("Authentication required"));
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
+    );
+    socket.userId = decoded.id;
+    return next();
+  } catch (error) {
+    return next(new Error("Invalid or expired token"));
+  }
+});
+
+io.on("connection", (socket) => {
+  socket.on("join-conversation", async ({ matchId }) => {
+    try {
+      if (!matchId) return;
+      const match = await Match.findById(matchId);
+      if (!match) return;
+
+      const isParticipant =
+        match.farmer_id.toString() === socket.userId ||
+        match.vendor_id.toString() === socket.userId;
+
+      if (!isParticipant) return;
+      socket.join(`match:${matchId}`);
+    } catch (error) {
+      console.error("join-conversation error:", error.message);
+    }
+  });
+
+  socket.on("leave-conversation", ({ matchId }) => {
+    if (!matchId) return;
+    socket.leave(`match:${matchId}`);
+  });
+
+  socket.on("send-message", async ({ matchId, content }) => {
+    try {
+      if (!matchId || !content || !content.trim()) return;
+
+      const match = await Match.findById(matchId);
+      if (!match) return;
+
+      const isParticipant =
+        match.farmer_id.toString() === socket.userId ||
+        match.vendor_id.toString() === socket.userId;
+
+      if (!isParticipant) return;
+      if (!["interested", "connected"].includes(match.status)) return;
+
+      const recipient_id =
+        match.farmer_id.toString() === socket.userId
+          ? match.vendor_id
+          : match.farmer_id;
+
+      const message = await Message.sendMessage({
+        sender_id: socket.userId,
+        recipient_id,
+        match_id: matchId,
+        content: content.trim(),
+      });
+
+      io.to(`match:${matchId}`).emit("new-message", {
+        _id: message._id,
+        match_id: message.match_id,
+        sender_id: message.sender_id,
+        recipient_id: message.recipient_id,
+        content: message.content,
+        status: message.status,
+        createdAt: message.createdAt,
+      });
+    } catch (error) {
+      console.error("send-message error:", error.message);
+    }
+  });
+});
+
 const startServer = async () => {
   try {
     await initializeRabbitMQ();
@@ -163,7 +271,7 @@ const startServer = async () => {
     });
     console.log("MongoDB connected successfully");
 
-    app.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running at http://localhost:${PORT}`);
     });
   } catch (err) {

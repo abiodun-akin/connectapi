@@ -42,6 +42,14 @@ router.post(
     const { plan, amount, email } = req.body;
 
     try {
+      const activeSubscription = await Subscription.getUserActiveSubscription(req.user._id);
+      if (activeSubscription?.hasUsedActiveTopup) {
+        throw new ValidationError(
+          "Only one extra payment is allowed while your current subscription is active",
+          "subscription"
+        );
+      }
+
       const reference = `ref_${req.user._id}_${Date.now()}`;
 
       // Create payment record
@@ -110,7 +118,11 @@ router.post(
         if (process.env.NODE_ENV === "production") {
           throw paystackError;
         }
-        paystackData = { status: "success", amount: paymentRecord.amount };
+        paystackData = {
+          status: "success",
+          amount: paymentRecord.amount,
+          reference,
+        };
       }
 
       if (!validatePaystackResponse(paystackData)) {
@@ -177,16 +189,24 @@ router.post(
       const endDate = getSubscriptionEndDate(plan);
 
       // Create or update subscription
-      const subscription = await Subscription.createOrUpdateSubscription(
-        req.user._id,
-        {
-          plan: paymentRecord.plan,
-          amount: paymentRecord.amount,
-          startDate: new Date(),
-          endDate,
-          reference,
+      let subscription;
+      try {
+        subscription = await Subscription.createOrUpdateSubscription(
+          req.user._id,
+          {
+            plan: paymentRecord.plan,
+            amount: paymentRecord.amount,
+            startDate: new Date(),
+            endDate,
+            reference,
+          }
+        );
+      } catch (subscriptionError) {
+        if (subscriptionError.code === "ACTIVE_TOPUP_LIMIT_REACHED") {
+          throw new ValidationError(subscriptionError.message, "subscription");
         }
-      );
+        throw subscriptionError;
+      }
 
       // Update payment record with subscription reference
       paymentRecord.subscription_id = subscription._id;
@@ -199,7 +219,7 @@ router.post(
         plan: paymentRecord.plan,
         subscriptionId: subscription._id,
         email: paymentRecord.email,
-        subscriptionEndDate: endDate,
+        subscriptionEndDate: subscription.endDate,
         timestamp: new Date(),
       });
 
@@ -228,7 +248,7 @@ router.post("/close", async (req, res, next) => {
 
     if (subscription) {
       await Subscription.cancelSubscription(
-        subscription._id,
+        req.user._id,
         "User-initiated cancellation"
       );
 
@@ -248,6 +268,41 @@ router.post("/close", async (req, res, next) => {
 });
 
 /**
+ * POST /api/payment/cancel-renewal
+ * Turn off auto-renewal while keeping current period active
+ */
+router.post("/cancel-renewal", async (req, res, next) => {
+  try {
+    const subscription = await Subscription.findOneAndUpdate(
+      {
+        user_id: req.user._id,
+        status: { $in: ["active", "trial"] },
+        endDate: { $gt: new Date() },
+      },
+      { autoRenewal: false },
+      { new: true }
+    );
+
+    if (!subscription) {
+      throw new NotFoundError("Active subscription");
+    }
+
+    publishEvent("payment_events", "payment.renewal.cancelled", {
+      userId: req.user._id,
+      subscriptionId: subscription._id,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "Auto-renewal cancelled. Your subscription remains active until end date.",
+      subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /api/payment/subscription
  * Get user's active subscription
  */
@@ -256,22 +311,28 @@ router.get("/subscription", async (req, res, next) => {
     const subscription = await Subscription.getUserActiveSubscription(
       req.user._id
     );
+    const hasEverSubscribed = await Subscription.hasEverSubscribed(req.user._id);
 
     if (!subscription) {
       return res.json({
         hasActiveSubscription: false,
+        hasEverSubscribed,
         subscription: null,
       });
     }
 
     res.json({
       hasActiveSubscription: true,
+      hasEverSubscribed,
       subscription: {
         plan: subscription.plan,
         status: subscription.status,
         startDate: subscription.startDate,
         endDate: subscription.endDate,
         renewalDate: subscription.renewalDate,
+        autoRenewal: subscription.autoRenewal,
+        hasUsedActiveTopup: subscription.hasUsedActiveTopup,
+        canMakeExtraPayment: !subscription.hasUsedActiveTopup,
         daysRemaining: Math.ceil(
           (subscription.endDate - new Date()) / (1000 * 60 * 60 * 24)
         ),

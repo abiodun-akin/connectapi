@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const subscriptionSchema = new mongoose.Schema(
   {
@@ -61,6 +62,10 @@ const subscriptionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    hasUsedActiveTopup: {
+      type: Boolean,
+      default: false,
+    },
     cancellationReason: String,
   },
   {
@@ -76,6 +81,8 @@ subscriptionSchema.statics.createOrUpdateSubscription = async function (
   subscriptionData
 ) {
   const { plan, amount, startDate, endDate, reference } = subscriptionData;
+  const now = new Date();
+  const durationMs = Math.max(new Date(endDate).getTime() - new Date(startDate).getTime(), 30 * MS_PER_DAY);
 
   // Check if user already has an active subscription
   let subscription = await this.findOne({
@@ -84,11 +91,29 @@ subscriptionSchema.statics.createOrUpdateSubscription = async function (
   });
 
   if (subscription) {
+    const isCurrentlyActive = subscription.endDate && subscription.endDate > now;
+
+    if (isCurrentlyActive && subscription.hasUsedActiveTopup) {
+      const error = new Error("Only one extra payment is allowed while subscription is active");
+      error.code = "ACTIVE_TOPUP_LIMIT_REACHED";
+      throw error;
+    }
+
     // Update existing subscription
     subscription.plan = plan;
     subscription.amount = amount;
-    subscription.endDate = endDate;
-    subscription.renewalDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000); // 1 day after end
+    subscription.status = "active";
+
+    if (isCurrentlyActive) {
+      subscription.endDate = new Date(subscription.endDate.getTime() + durationMs);
+      subscription.hasUsedActiveTopup = true;
+    } else {
+      subscription.startDate = startDate;
+      subscription.endDate = endDate;
+      subscription.hasUsedActiveTopup = false;
+    }
+
+    subscription.renewalDate = new Date(subscription.endDate.getTime() + MS_PER_DAY); // 1 day after end
     subscription.paymentReferences.push({
       reference,
       paymentDate: startDate,
@@ -102,7 +127,8 @@ subscriptionSchema.statics.createOrUpdateSubscription = async function (
       amount,
       startDate,
       endDate,
-      renewalDate: new Date(endDate.getTime() + 24 * 60 * 60 * 1000),
+      renewalDate: new Date(endDate.getTime() + MS_PER_DAY),
+      hasUsedActiveTopup: false,
       paymentReferences: [
         {
           reference,
@@ -133,8 +159,11 @@ subscriptionSchema.statics.isUserSubscribed = async function (userId, plan) {
 subscriptionSchema.statics.getUserActiveSubscription = async function (userId) {
   return this.findOne({
     user_id: userId,
-    status: "active",
+    status: { $in: ["active", "trial"] },
     endDate: { $gt: new Date() },
+  }).sort({
+    status: 1,
+    endDate: -1,
   });
 };
 
@@ -158,13 +187,14 @@ subscriptionSchema.statics.createTrialSubscription = async function (userId, pla
     plan,
     status: "trial",
     isTrialPeriod: true,
-    amount: 0, // Free trial
+    amount: 0, // First charge is zero for free trial activation
     startDate: trialStartDate,
     trialStartDate,
     trialEndDate,
     endDate: trialEndDate,
+    renewalDate: trialEndDate,
     paymentRequiredBy: trialEndDate,
-    autoRenewal: false,
+    autoRenewal: true,
   });
 };
 
@@ -181,6 +211,14 @@ subscriptionSchema.statics.hasActiveOrTrialSubscription = async function (userId
     user_id: userId,
     status: { $in: ["active", "trial"] },
     endDate: { $gt: new Date() },
+  });
+  return !!subscription;
+};
+
+subscriptionSchema.statics.hasEverSubscribed = async function (userId) {
+  const subscription = await this.findOne({
+    user_id: userId,
+    status: { $in: ["active", "expired", "cancelled"] },
   });
   return !!subscription;
 };

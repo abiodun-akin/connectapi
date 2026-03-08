@@ -62,6 +62,46 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    isAgent: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    agentStatus: {
+      type: String,
+      enum: ["none", "pending", "approved", "declined"],
+      default: "none",
+      index: true,
+    },
+    referredByAgentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    referredPromoCode: {
+      type: String,
+      default: null,
+      uppercase: true,
+      trim: true,
+    },
+    agentWallet: {
+      availableBalance: {
+        type: Number,
+        default: 0,
+      },
+      lockedBalance: {
+        type: Number,
+        default: 0,
+      },
+      lifetimeEarned: {
+        type: Number,
+        default: 0,
+      },
+      lifetimeWithdrawn: {
+        type: Number,
+        default: 0,
+      },
+    },
     // Last login tracking
     lastLogin: Date,
   },
