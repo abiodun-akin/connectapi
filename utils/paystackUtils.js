@@ -1,17 +1,28 @@
 const axios = require('axios');
 
+const getPaystackSecretKey = () => {
+  // Support legacy and current env key names across deployments.
+  return process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET || null;
+};
+
 /**
  * Verify payment with Paystack API
  * @param {string} reference - Paystack payment reference
  * @returns {Promise<Object>} - Paystack response data
  */
 const verifyPaystackPayment = async (reference) => {
+  const secretKey = getPaystackSecretKey();
+
+  if (!secretKey) {
+    throw new Error('Paystack secret key is not configured');
+  }
+
   try {
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${secretKey}`,
         },
       }
     );
@@ -22,8 +33,13 @@ const verifyPaystackPayment = async (reference) => {
 
     return response.data.data;
   } catch (error) {
-    console.error('Paystack verification error:', error.message);
-    throw new Error('Unable to verify payment with Paystack');
+    const upstreamMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message;
+
+    console.error('Paystack verification error:', upstreamMessage);
+    throw new Error(`Unable to verify payment with Paystack: ${upstreamMessage}`);
   }
 };
 
@@ -63,4 +79,5 @@ module.exports = {
   verifyPaystackPayment,
   validatePaystackResponse,
   getSubscriptionEndDate,
+  getPaystackSecretKey,
 };

@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const PaymentRecord = require("../paymentRecord");
 const Subscription = require("../subscription");
-const { verifyPaystackPayment } = require("../utils/paystackUtils");
+const { verifyPaystackPayment, getPaystackSecretKey } = require("../utils/paystackUtils");
 const { NotFoundError, ValidationError } = require("../errors/AppError");
 const axios = require("axios");
 const { publishEvent } = require("../middleware/eventNotification");
@@ -215,6 +215,14 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
     }
 
     try {
+      const secretKey = getPaystackSecretKey();
+      if (!secretKey) {
+        return res.status(500).json({
+          error: "Paystack secret key is not configured",
+          code: "PAYSTACK_CONFIG_ERROR",
+        });
+      }
+
       // Call Paystack refund API
       const refundResponse = await axios.post(
         "https://api.paystack.co/refund",
@@ -224,7 +232,7 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            Authorization: `Bearer ${secretKey}`,
           },
         }
       );

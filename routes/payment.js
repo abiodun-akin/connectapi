@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { publishEvent } = require("../middleware/eventNotification");
 const { validateRequest, validationRules } = require("../validators/inputValidator");
-const { ValidationError, NotFoundError } = require("../errors/AppError");
+const { ValidationError, NotFoundError, InternalServerError } = require("../errors/AppError");
 const PaymentRecord = require("../paymentRecord");
 const Subscription = require("../subscription");
 const { recordPaymentViolation } = require("../utils/activityScorer");
@@ -113,10 +113,11 @@ router.post(
         paystackData = await verifyPaystackPayment(reference);
       } catch (paystackError) {
         console.error("Paystack verification failed:", paystackError.message);
-        // For development, allow verification to proceed
-        // In production, you would return an error here
+        await PaymentRecord.recordVerificationError(reference, paystackError);
+
+        // In non-production environments, allow local flow testing without external dependency.
         if (process.env.NODE_ENV === "production") {
-          throw paystackError;
+          throw new InternalServerError(paystackError.message || "Unable to verify payment with Paystack");
         }
         paystackData = {
           status: "success",
