@@ -3,13 +3,15 @@ const router = express.Router();
 const User = require("../user");
 const Message = require("../message");
 const Subscription = require("../subscription");
+const bcrypt = require("bcryptjs");
+const validator = require("validator");
 const {
   suspendUserAccount,
   unsuspendUserAccount,
   getActivityReport,
   recordPaymentViolation,
 } = require("../utils/activityScorer");
-const { NotFoundError, UnauthorizedError } = require("../errors/AppError");
+const { NotFoundError, UnauthorizedError, ValidationError } = require("../errors/AppError");
 
 // Middleware to verify admin access
 const verifyAdmin = async (req, res, next) => {
@@ -292,6 +294,56 @@ router.get("/violations", async (req, res, next) => {
         total = await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
       } else {
         users = users.concat(flaggedResults);
+
+  /**
+   * POST /api/admin/users/:userId/reset-password
+   * Admin directly resets a non-admin user's password
+   */
+  router.post("/users/:userId/reset-password", async (req, res, next) => {
+    const { newPassword } = req.body;
+
+    try {
+      if (!newPassword) {
+        return next(new ValidationError("New password is required", "newPassword"));
+      }
+
+      if (
+        !validator.isStrongPassword(newPassword, {
+          minLength: 8,
+          minLowercase: 1,
+          minUppercase: 1,
+          minNumbers: 1,
+          minSymbols: 0,
+        })
+      ) {
+        return next(
+          new ValidationError(
+            "Password must be at least 8 characters with 1 uppercase letter and 1 number",
+            "newPassword"
+          )
+        );
+      }
+
+      const user = await User.findById(req.params.userId).select("+password isAdmin");
+      if (!user) {
+        return next(new NotFoundError("User"));
+      }
+
+      if (user.isAdmin) {
+        return res.status(403).json({
+          error: "Admin account passwords cannot be reset via this endpoint",
+          code: "FORBIDDEN",
+        });
+      }
+
+      user.password = await bcrypt.hash(newPassword, 12);
+      await user.save();
+
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      next(error);
+    }
+  });
         total += await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
       }
     }
