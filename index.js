@@ -21,6 +21,7 @@ const getreport = require("./middleware/getreport");
 const errorHandler = require("./middleware/errorHandler");
 const Match = require("./match");
 const Message = require("./message");
+const { ensureSuperAdmin } = require("./utils/superAdminBootstrap");
 const {
   initializeRabbitMQ,
   eventNotificationMiddleware,
@@ -314,6 +315,8 @@ const startServer = async () => {
       useUnifiedTopology: true,
     });
     console.log("MongoDB connected successfully");
+
+    await ensureSuperAdmin();
 
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running at http://localhost:${PORT}`);

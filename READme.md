@@ -38,7 +38,20 @@ PORT=3000
 CONN_STR=mongodb://localhost:27017/connectapi
 TOKEN_SECRET=your_jwt_secret
 FRONTEND_ORIGIN=http://localhost:5173
+SUPER_ADMIN_EMAIL=superadmin@farmconnect.local
+SUPER_ADMIN_PASSWORD=Admin12345
+SUPER_ADMIN_NAME=Super Admin
 ```
+
+Super admin bootstrap behavior:
+
+- On API startup, the server checks `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD`.
+- If no user exists with that email, it creates one with `isAdmin: true`.
+- If user exists but is not admin, it upgrades the user to admin.
+- If `SUPER_ADMIN_ROTATE_PASSWORD=true`, startup resets that account password from env.
+- In non-production only, if super admin env vars are missing, a fallback account is auto-created:
+	- email: `superadmin@farmconnect.local`
+	- password: `Admin12345`
 
 Start in development:
 
