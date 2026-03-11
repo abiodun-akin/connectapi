@@ -121,6 +121,18 @@ router.post("/:agentId/promo-codes", async (req, res, next) => {
   }
 });
 
+router.get("/:agentId/promo-codes", async (req, res, next) => {
+  try {
+    const promoCodes = await PromoCode.find({ agent_id: req.params.agentId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({ promoCodes });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/withdrawals", async (req, res, next) => {
   try {
     const { status = "all" } = req.query;

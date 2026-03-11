@@ -14,6 +14,7 @@ const matchesRoutes = require("./routes/matches");
 const messagesRoutes = require("./routes/messages");
 const adminRoutes = require("./routes/admin");
 const adminAgentsRoutes = require("./routes/adminAgents");
+const adminPaymentRoutes = require("./routes/adminPayment");
 const agentsRoutes = require("./routes/agents");
 const cronRoutes = require("./routes/cron");
 const requireAuth = require("./middleware/requireAuth");
@@ -138,6 +139,7 @@ app.use("/api/messages", requireAuth, messagesRoutes);
 
 // Admin routes (require authentication and admin status)
 app.use("/api/admin", requireAuth, adminRoutes);
+app.use("/api/admin", requireAuth, adminPaymentRoutes);
 app.use("/api/admin/agents", requireAuth, adminAgentsRoutes);
 
 // Agent routes (require authentication)
