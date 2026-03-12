@@ -67,6 +67,19 @@ const subscriptionSchema = new mongoose.Schema(
       default: false,
     },
     cancellationReason: String,
+    // Card authorization for deferred trial billing
+    paystackAuthCode: {
+      type: String,
+      default: null,
+    },
+    paystackAuthEmail: {
+      type: String,
+      default: null,
+    },
+    isCardAuthorized: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -267,6 +280,18 @@ subscriptionSchema.statics.getExpiredTrials = async function () {
     status: "trial",
     trialEndDate: { $lt: new Date() },
   });
+};
+
+subscriptionSchema.statics.saveAuthorizationCode = async function (userId, authCode, email) {
+  return this.findOneAndUpdate(
+    { user_id: userId, status: "trial" },
+    {
+      paystackAuthCode: authCode,
+      paystackAuthEmail: email,
+      isCardAuthorized: true,
+    },
+    { new: true }
+  );
 };
 
 const Subscription = mongoose.model("Subscription", subscriptionSchema);

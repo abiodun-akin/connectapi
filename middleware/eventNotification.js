@@ -9,6 +9,7 @@ const initializeRabbitMQ = async () => {
     channel = await connection.createChannel();
     await channel.assertExchange('auth_events', 'topic', { durable: true });
     await channel.assertExchange('payment_events', 'topic', { durable: true });
+    await channel.assertExchange('trial_events', 'topic', { durable: true });
     console.log('RabbitMQ connected');
   } catch (error) {
     console.error('RabbitMQ connection failed:', error);

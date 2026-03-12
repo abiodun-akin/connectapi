@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const User = require("../user");
 const AgentApplication = require("../agentApplication");
 const AgentWithdrawal = require("../agentWithdrawal");
@@ -83,7 +84,23 @@ router.post("/:agentId/promo-codes", async (req, res, next) => {
       validTo = null,
     } = req.body;
 
-    if (!code || String(code).trim().length < 4) {
+    // Auto-generate code if not supplied, ensure uniqueness
+    let promoCodeStr = String(code || "").trim().toUpperCase();
+    if (!promoCodeStr) {
+      let generated = false;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const candidate = "FC" + crypto.randomBytes(3).toString("hex").toUpperCase();
+        const exists = await PromoCode.findOne({ code: candidate });
+        if (!exists) {
+          promoCodeStr = candidate;
+          generated = true;
+          break;
+        }
+      }
+      if (!generated) {
+        throw new ValidationError("Failed to generate a unique promo code — try again", "code");
+      }
+    } else if (promoCodeStr.length < 4) {
       throw new ValidationError("Promo code must be at least 4 characters", "code");
     }
 
@@ -102,7 +119,7 @@ router.post("/:agentId/promo-codes", async (req, res, next) => {
     }
 
     const promoCode = await PromoCode.create({
-      code: String(code).trim().toUpperCase(),
+      code: promoCodeStr,
       agent_id: req.params.agentId,
       createdBy: req.user._id,
       rebateType,

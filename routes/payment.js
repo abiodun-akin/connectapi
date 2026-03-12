@@ -50,6 +50,13 @@ router.post(
         );
       }
 
+      // If the user is in an active trial and hasn't yet authorized their card,
+      // only charge ₦50 for card authorization — the full amount is deferred.
+      const isTrialAuth =
+        activeSubscription?.status === "trial" && !activeSubscription?.isCardAuthorized;
+      const effectiveAmount = isTrialAuth ? 50 : amount;
+      const recordType = isTrialAuth ? "trial_auth" : "payment";
+
       const reference = `ref_${req.user._id}_${Date.now()}`;
 
       // Create payment record
@@ -57,26 +64,31 @@ router.post(
         user_id: req.user._id,
         reference,
         plan,
-        amount,
+        amount: effectiveAmount,
         email,
+        type: recordType,
       });
 
       publishEvent("payment_events", "payment.initialized", {
         userId: req.user._id,
         reference,
         plan,
-        amount,
+        amount: effectiveAmount,
         email,
+        isTrialAuth,
         timestamp: new Date(),
       });
 
       res.json({
-        message: "Payment initialized",
+        message: isTrialAuth
+          ? "Card authorization initialized — no charge today, ₦5,000 billed after trial"
+          : "Payment initialized",
         reference,
+        isTrialAuth,
         paymentData: {
           reference,
           plan,
-          amount,
+          amount: effectiveAmount,
           email,
         },
       });
@@ -138,6 +150,14 @@ router.post(
       // Update payment record
       await PaymentRecord.updatePaymentStatus(reference, "verified", paystackData);
 
+      // If this is a trial card authorization, store the authorization code on the subscription
+      if (paymentRecord.type === "trial_auth") {
+        const authCode = paystackData.authorization?.authorization_code;
+        if (authCode) {
+          await Subscription.saveAuthorizationCode(req.user._id, authCode, paymentRecord.email);
+        }
+      }
+
       publishEvent("payment_events", "payment.verified", {
         userId: req.user._id,
         reference,
@@ -184,6 +204,17 @@ router.post(
           "Payment must be verified before confirming success",
           "reference"
         );
+      }
+
+      // For trial card authorizations, the card is already saved in verify step.
+      // Just mark the payment record as success — no subscription is created yet.
+      if (paymentRecord.type === "trial_auth") {
+        paymentRecord.status = "success";
+        await paymentRecord.save();
+        return res.json({
+          message: "Card authorized for future billing. You will be charged ₦5,000 when your free trial expires.",
+          isCardAuthorization: true,
+        });
       }
 
       // Calculate subscription end date
@@ -259,6 +290,7 @@ router.post("/close", async (req, res, next) => {
 
     publishEvent("payment_events", "payment.closed", {
       userId: req.user._id,
+      email: req.user.email,
       timestamp: new Date(),
     });
 
@@ -337,6 +369,8 @@ router.get("/subscription", async (req, res, next) => {
         daysRemaining: Math.ceil(
           (subscription.endDate - new Date()) / (1000 * 60 * 60 * 24)
         ),
+        isTrialPeriod: subscription.isTrialPeriod,
+        isCardAuthorized: subscription.isCardAuthorized,
       },
     });
   } catch (error) {

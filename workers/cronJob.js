@@ -33,18 +33,39 @@ const emailTemplates = {
     subject: 'Payment Cancelled',
     html: '<h1>Payment Cancelled</h1><p>Your payment process was cancelled.</p>',
   },
+  'trial.reminder': {
+    subject: 'Your Trial Ends Soon',
+    html: '<h1>Trial Ending Soon</h1><p>Your Farm Connect trial is close to expiring.</p>',
+  },
+  'subscription.converted': {
+    subject: 'Trial Converted to Subscription',
+    html: '<h1>Subscription Active</h1><p>Your trial has been converted to a paid subscription.</p>',
+  },
+  'subscription.cancelled': {
+    subject: 'Subscription Cancelled',
+    html: '<h1>Subscription Cancelled</h1><p>Your subscription has been cancelled.</p>',
+  },
 };
 
 const sendEmail = async (email, eventType, data) => {
   try {
+    if (!email) {
+      console.warn(`Skipping ${eventType}: missing recipient email`);
+      return;
+    }
+
     const template = emailTemplates[eventType];
     if (!template) return;
+
+    const htmlContent = typeof template.html === 'function'
+      ? template.html(data)
+      : template.html;
 
     await resend.emails.send({
       from: senderEmail,
       to: email,
       subject: template.subject,
-      html: template.html,
+      html: htmlContent,
     });
 
     console.log(`Email sent for ${eventType} to ${email}`);
@@ -60,42 +81,47 @@ const processMessages = async () => {
 
     await channel.assertExchange('auth_events', 'topic', { durable: true });
     await channel.assertExchange('payment_events', 'topic', { durable: true });
+    await channel.assertExchange('trial_events', 'topic', { durable: true });
 
     const authQueue = await channel.assertQueue('auth_notifications', { durable: true });
     const paymentQueue = await channel.assertQueue('payment_notifications', { durable: true });
+    const trialQueue = await channel.assertQueue('trial_notifications', { durable: true });
 
     await channel.bindQueue(authQueue.queue, 'auth_events', 'auth.*');
     await channel.bindQueue(paymentQueue.queue, 'payment_events', 'payment.*');
+    await channel.bindQueue(trialQueue.queue, 'trial_events', '#');
 
     let processed = 0;
 
-    let msg = await channel.get(authQueue.queue);
-    while (msg) {
-      const data = JSON.parse(msg.content.toString());
-      const eventType = msg.fields.routingKey;
-      await sendEmail(data.email, eventType, data);
-      channel.ack(msg);
-      processed++;
-      msg = await channel.get(authQueue.queue);
-    }
+    const processQueue = async (queueName) => {
+      let msg = await channel.get(queueName);
+      while (msg) {
+        const data = JSON.parse(msg.content.toString());
+        const eventType = msg.fields.routingKey;
+        await sendEmail(data.email, eventType, data);
+        channel.ack(msg);
+        processed++;
+        msg = await channel.get(queueName);
+      }
+    };
 
-    msg = await channel.get(paymentQueue.queue);
-    while (msg) {
-      const data = JSON.parse(msg.content.toString());
-      const eventType = msg.fields.routingKey;
-      await sendEmail(data.email, eventType, data);
-      channel.ack(msg);
-      processed++;
-      msg = await channel.get(paymentQueue.queue);
-    }
+    await processQueue(authQueue.queue);
+    await processQueue(paymentQueue.queue);
+    await processQueue(trialQueue.queue);
 
     console.log(`Processed ${processed} messages`);
     await connection.close();
-    process.exit(0);
+    return processed;
   } catch (error) {
     console.error('Cron job failed:', error);
-    process.exit(1);
+    throw error;
   }
 };
 
-processMessages();
+if (require.main === module) {
+  processMessages()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+}
+
+module.exports = { processMessages };

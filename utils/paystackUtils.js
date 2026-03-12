@@ -75,9 +75,48 @@ const getSubscriptionEndDate = (planName = 'basic') => {
   return endDate;
 };
 
+/**
+ * Charge a stored card authorization (deferred billing after trial)
+ * @param {string} authCode - Paystack authorization_code from a previous transaction
+ * @param {string} email - Customer email (must match original authorization)
+ * @param {number} amountNGN - Amount to charge in Naira (e.g. 5000)
+ * @returns {Promise<Object>} - Paystack charge response data
+ */
+const chargeAuthorization = async (authCode, email, amountNGN) => {
+  const secretKey = getPaystackSecretKey();
+  if (!secretKey) {
+    throw new Error('Paystack secret key is not configured');
+  }
+
+  try {
+    const response = await axios.post(
+      'https://api.paystack.co/transaction/charge_authorization',
+      {
+        authorization_code: authCode,
+        email,
+        amount: Math.round(amountNGN * 100), // convert to kobo
+      },
+      {
+        headers: { Authorization: `Bearer ${secretKey}` },
+      }
+    );
+
+    if (!response.data.status) {
+      throw new Error('Charge authorization failed');
+    }
+
+    return response.data.data;
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message;
+    console.error('Charge authorization error:', msg);
+    throw new Error(`Unable to charge authorization: ${msg}`);
+  }
+};
+
 module.exports = {
   verifyPaystackPayment,
   validatePaystackResponse,
   getSubscriptionEndDate,
   getPaystackSecretKey,
+  chargeAuthorization,
 };

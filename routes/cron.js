@@ -7,6 +7,7 @@
 const express = require("express");
 const router = express.Router();
 const { processTrialExpirations, cancelOverdueTrials } = require("../workers/trialWorker");
+const { processMessages } = require("../workers/cronJob");
 
 // Middleware to verify cron secret
 const verifyCronSecret = (req, res, next) => {
@@ -42,6 +43,32 @@ router.post("/process-trials", verifyCronSecret, async (req, res) => {
     console.error("[Cron] Error in process-trials:", error);
     res.status(500).json({
       error: "Error processing trials",
+      code: "INTERNAL_ERROR",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/cron/process-notifications
+ * Drain queued auth/payment/trial notifications and send emails
+ * Protected by CRON_SECRET header or query parameter
+ */
+router.post("/process-notifications", verifyCronSecret, async (req, res) => {
+  try {
+    console.log("[Cron] Triggered: process-notifications");
+
+    const processed = await processMessages();
+
+    res.json({
+      message: "Notification queue processing completed",
+      processed,
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    console.error("[Cron] Error in process-notifications:", error);
+    res.status(500).json({
+      error: "Error processing notifications",
       code: "INTERNAL_ERROR",
       message: error.message,
     });

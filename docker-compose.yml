@@ -42,6 +42,8 @@ services:
     networks:
       - farmconnect
     command: npm run worker
+    healthcheck:
+      disable: true
     depends_on:
       - connectapi
     restart: unless-stopped

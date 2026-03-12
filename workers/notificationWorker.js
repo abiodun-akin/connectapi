@@ -121,10 +121,66 @@ const emailTemplates = {
       </div>
     `,
   },
+  "trial.reminder": {
+    subject: "Your Free Trial Ends Soon - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #e67e22;">⏰ Trial Ending in ${data.daysRemaining} Day${data.daysRemaining !== 1 ? 's' : ''}</h1>
+          <p style="color: #555; font-size: 16px;">Your Farm Connect free trial expires on <strong>${new Date(data.trialEndDate).toLocaleDateString()}</strong>.</p>
+          ${data.isCardAuthorized
+            ? `<div style="margin: 20px 0; padding: 16px; background: #eafaf1; border-left: 4px solid #27ae60; border-radius: 4px;">
+                <p style="color: #555; margin: 0;">✅ Your card is on file. <strong>₦5,000</strong> will be charged automatically when your trial ends.</p>
+               </div>`
+            : `<div style="margin: 20px 0; padding: 16px; background: #fef9e7; border-left: 4px solid #f39c12; border-radius: 4px;">
+                <p style="color: #555; margin: 0;">⚠️ No payment method on file. Please <a href="${process.env.APP_URL || 'https://farmconnect.com'}/pricing" style="color: #2980b9;">set up billing</a> to continue after your trial.</p>
+               </div>`
+          }
+          <p style="color: #999; font-size: 14px; margin-top: 20px;">If you cancel before your trial ends, you will not be charged.</p>
+        </div>
+      </div>
+    `,
+  },
+  "subscription.converted": {
+    subject: "Subscription Activated - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #27ae60;">🎉 Subscription Active!</h1>
+          <p style="color: #555; font-size: 16px;">Your free trial has ended and your subscription has been activated.</p>
+          <div style="margin: 20px 0; padding: 20px; background: #f0f7f4; border-left: 4px solid #27ae60; border-radius: 4px;">
+            <p style="color: #555; margin: 5px 0;"><strong>Amount Charged:</strong> ₦${(data.amount || 5000).toLocaleString()}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Active Until:</strong> ${data.endDate ? new Date(data.endDate).toLocaleDateString() : 'N/A'}</p>
+          </div>
+          <p style="color: #555; font-size: 16px;">Thank you for subscribing to Farm Connect!</p>
+        </div>
+      </div>
+    `,
+  },
+  "subscription.cancelled": {
+    subject: "Subscription Cancelled - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #e74c3c;">Subscription Cancelled</h1>
+          <p style="color: #555; font-size: 16px;">Your Farm Connect subscription has been cancelled.</p>
+          ${data.reason ? `<p style="color: #777; font-size: 14px;">Reason: ${data.reason}</p>` : ''}
+          <p style="color: #555; font-size: 16px; margin-top: 20px;">
+            You can <a href="${process.env.APP_URL || 'https://farmconnect.com'}/pricing" style="color: #2980b9;">resubscribe at any time</a>.
+          </p>
+        </div>
+      </div>
+    `,
+  },
 };
 
 const sendEmail = async (email, eventType, data) => {
   try {
+    if (!email) {
+      console.warn(`Skipping ${eventType}: missing recipient email`);
+      return;
+    }
+
     const template = emailTemplates[eventType];
     if (!template) {
       console.warn(`No email template found for event: ${eventType}`);
@@ -155,6 +211,7 @@ const startWorker = async () => {
 
     await channel.assertExchange("auth_events", "topic", { durable: true });
     await channel.assertExchange("payment_events", "topic", { durable: true });
+    await channel.assertExchange("trial_events", "topic", { durable: true });
 
     const authQueue = await channel.assertQueue("auth_notifications", {
       durable: true,
@@ -162,9 +219,13 @@ const startWorker = async () => {
     const paymentQueue = await channel.assertQueue("payment_notifications", {
       durable: true,
     });
+    const trialQueue = await channel.assertQueue("trial_notifications", {
+      durable: true,
+    });
 
     await channel.bindQueue(authQueue.queue, "auth_events", "auth.*");
     await channel.bindQueue(paymentQueue.queue, "payment_events", "payment.*");
+    await channel.bindQueue(trialQueue.queue, "trial_events", "#");
 
     channel.consume(authQueue.queue, async (msg) => {
       if (msg) {
@@ -189,6 +250,20 @@ const startWorker = async () => {
           channel.ack(msg);
         } catch (error) {
           console.error("Error processing payment message:", error);
+          channel.nack(msg, false, true); // Requeue on error
+        }
+      }
+    });
+
+    channel.consume(trialQueue.queue, async (msg) => {
+      if (msg) {
+        try {
+          const data = JSON.parse(msg.content.toString());
+          const eventType = msg.fields.routingKey;
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
+        } catch (error) {
+          console.error("Error processing trial message:", error);
           channel.nack(msg, false, true); // Requeue on error
         }
       }

@@ -37,6 +37,11 @@ const paymentRecordSchema = new mongoose.Schema(
       default: "pending",
       index: true,
     },
+    type: {
+      type: String,
+      enum: ["payment", "trial_auth"],
+      default: "payment",
+    },
     paymentMethod: {
       type: String,
       default: "paystack",
@@ -142,7 +147,8 @@ paymentRecordSchema.statics.createPaymentRecord = async function (paymentData) {
     paystackTransactionId,
     authorizationUrl,
     accessCode,
-    description
+    description,
+    type,
   } = paymentData;
 
   return this.create({
@@ -152,6 +158,7 @@ paymentRecordSchema.statics.createPaymentRecord = async function (paymentData) {
     amount,
     email,
     status: "pending",
+    type: type || "payment",
     paystackTransactionId,
     authorizationUrl,
     accessCode,

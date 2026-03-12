@@ -10,6 +10,7 @@ const Subscription = require("../subscription");
 const User = require("../user");
 const { publishEvent } = require("../middleware/eventNotification");
 const { recordPaymentViolation } = require("../utils/activityScorer");
+const { chargeAuthorization, getSubscriptionEndDate } = require("../utils/paystackUtils");
 
 /**
  * Check and process trial expirations
@@ -28,39 +29,65 @@ async function processTrialExpirations() {
         const user = await User.findById(subscription.user_id);
         if (!user) continue;
 
-        // Check if payment has been made
-        const paymentRecord = await require("../paymentRecord").findOne({
-          subscription_id: subscription._id,
-          status: "verified",
-        });
+        if (subscription.paystackAuthCode) {
+          // Card was authorized during trial — attempt to charge the full subscription fee
+          let chargeResult;
+          try {
+            chargeResult = await chargeAuthorization(
+              subscription.paystackAuthCode,
+              subscription.paystackAuthEmail || user.email,
+              5000
+            );
+          } catch (chargeErr) {
+            console.error(`[Trial Worker] Charge failed for user ${user.email}:`, chargeErr.message);
+          }
 
-        if (paymentRecord) {
-          // Payment completed, convert trial to paid subscription
-          const updated = await Subscription.convertTrialToPayment(subscription._id);
-          console.log(`[Trial Worker] Converted trial to paid for user ${user.email}`);
+          if (chargeResult?.status === "success") {
+            const endDate = getSubscriptionEndDate(subscription.plan);
+            await Subscription.convertTrialToPayment(user._id, {
+              plan: subscription.plan,
+              amount: 5000,
+              reference: chargeResult.reference,
+              endDate,
+            });
+            console.log(`[Trial Worker] Charged and converted trial to paid for user ${user.email}`);
 
-          // Publish success event
-          await publishEvent("subscription.converted", {
-            userId: user._id,
-            email: user.email,
-            subscriptionId: subscription._id,
-          });
+            await publishEvent("trial_events", "subscription.converted", {
+              userId: user._id,
+              email: user.email,
+              subscriptionId: subscription._id,
+              amount: 5000,
+              endDate,
+            });
+          } else {
+            // Charge failed or unavailable — cancel
+            await Subscription.cancelSubscription(user._id, "Trial expired - card charge failed");
+            console.log(`[Trial Worker] Cancelled trial (charge failed) for user ${user.email}`);
+
+            await recordPaymentViolation(user._id, "default");
+
+            await publishEvent("trial_events", "subscription.cancelled", {
+              userId: user._id,
+              email: user.email,
+              subscriptionId: subscription._id,
+              reason: "Trial period expired - card charge failed",
+            });
+          }
         } else {
-          // No payment, cancel subscription
-          const cancelled = await Subscription.cancelSubscription(
-            subscription._id,
-            "Trial period expired - no payment received"
+          // No card authorization on file — cancel subscription
+          await Subscription.cancelSubscription(
+            user._id,
+            "Trial period expired - no payment authorization"
           );
-          console.log(`[Trial Worker] Cancelled expired trial for user ${user.email}`);
+          console.log(`[Trial Worker] Cancelled expired trial (no card) for user ${user.email}`);
 
           await recordPaymentViolation(user._id, "default");
 
-          // Publish cancellation event
-          await publishEvent("subscription.cancelled", {
+          await publishEvent("trial_events", "subscription.cancelled", {
             userId: user._id,
             email: user.email,
             subscriptionId: subscription._id,
-            reason: "Trial period expired - no payment received",
+            reason: "Trial period expired - no payment authorization on file",
           });
         }
       } catch (error) {
@@ -90,7 +117,7 @@ async function processTrialExpirations() {
         if (!user) continue;
 
         // Send reminder email
-        await publishEvent("trial.reminder", {
+        await publishEvent("trial_events", "trial.reminder", {
           userId: user._id,
           email: user.email,
           subscriptionId: subscription._id,
@@ -98,6 +125,7 @@ async function processTrialExpirations() {
           daysRemaining: Math.ceil(
             (subscription.trialEndDate - new Date()) / (24 * 60 * 60 * 1000)
           ),
+          isCardAuthorized: subscription.isCardAuthorized,
         });
 
         // Mark reminder as sent
@@ -170,7 +198,7 @@ async function cancelOverdueTrials() {
     for (const subscription of overdueTrials) {
       try {
         const cancelled = await Subscription.cancelSubscription(
-          subscription._id,
+          subscription.user_id,
           "Trial period expired - payment required date passed"
         );
         console.log(`[Trial Worker] Cancelled overdue trial: ${subscription._id}`);
@@ -179,7 +207,7 @@ async function cancelOverdueTrials() {
 
         const user = await User.findById(subscription.user_id);
         if (user) {
-          await publishEvent("subscription.cancelled", {
+          await publishEvent("trial_events", "subscription.cancelled", {
             userId: user._id,
             email: user.email,
             subscriptionId: subscription._id,

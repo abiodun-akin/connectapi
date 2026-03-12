@@ -8,6 +8,7 @@
     "start": "node index.js",
     "worker": "node workers/notificationWorker.js",
     "cron": "node workers/cronJob.js",
+    "trial:process": "node workers/trialProcessorJob.js",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --detectOpenHandles",

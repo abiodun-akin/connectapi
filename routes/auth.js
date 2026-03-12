@@ -180,14 +180,32 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
   }
 });
 
-router.post("/logout", (req, res) => {
+router.post("/logout", async (req, res) => {
+  let eventUser = null;
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.split(" ")[1] || req.cookies.jwt;
+    if (token) {
+      const decoded = jwt.decode(token);
+      if (decoded?.id) {
+        eventUser = await User.findById(decoded.id).select("_id email").lean();
+      }
+    }
+  } catch (_err) {
+    // Best-effort lookup only; logout should never fail because of notification data.
+  }
+
   res.cookie("jwt", "", {
     httpOnly: true,
     maxAge: 0,
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
 
-  publishEvent("auth_events", "auth.logout", { timestamp: new Date() });
+  publishEvent("auth_events", "auth.logout", {
+    userId: eventUser?._id || null,
+    email: eventUser?.email || null,
+    timestamp: new Date(),
+  });
 
   res.json({ message: "Logged out successfully" });
 });
