@@ -1,0 +1,21 @@
+name: Process Trials
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  process-trials:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger trial processing
+        env:
+          API_BASE_URL: ${{ secrets.FARMCONNECT_API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.FARMCONNECT_CRON_SECRET }}
+        run: |
+          set -e
+          curl --fail --show-error --silent \
+            -X POST "${API_BASE_URL}/api/cron/process-trials" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -H "Content-Type: application/json"

@@ -29,7 +29,15 @@ router.post("/apply", validateRequest(applySchema), async (req, res, next) => {
   try {
     const { motivation, contactPhone = "" } = req.body;
 
-    const existing = await AgentApplication.findOne({ user_id: req.user._id });
+    const [existing, user] = await Promise.all([
+      AgentApplication.findOne({ user_id: req.user._id }),
+      User.findById(req.user._id).select("isAgent agentStatus"),
+    ]);
+
+    if (user?.isAgent || user?.agentStatus === "approved" || existing?.status === "approved") {
+      throw new ConflictError("You are already an approved agent");
+    }
+
     if (existing?.status === "pending") {
       throw new ConflictError("You already have a pending agent application");
     }
@@ -60,11 +68,12 @@ router.post("/apply", validateRequest(applySchema), async (req, res, next) => {
 
 router.get("/me", async (req, res, next) => {
   try {
-    const [application, user] = await Promise.all([
+    const [application, user, withdrawals] = await Promise.all([
       AgentApplication.findOne({ user_id: req.user._id }).lean(),
       User.findById(req.user._id)
         .select("isAgent agentStatus agentWallet referredByAgentId referredPromoCode")
         .lean(),
+      AgentWithdrawal.find({ agent_id: req.user._id }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const codes = await PromoCode.find({ agent_id: req.user._id })
@@ -76,20 +85,27 @@ router.get("/me", async (req, res, next) => {
       .limit(20)
       .lean();
 
-    res.json({
-      agent: {
-        isAgent: !!user?.isAgent,
-        status: user?.agentStatus || "none",
-        wallet: user?.agentWallet || {
-          availableBalance: 0,
-          lockedBalance: 0,
-          lifetimeEarned: 0,
-          lifetimeWithdrawn: 0,
-        },
+    const agent = {
+      isAgent: !!user?.isAgent,
+      status: user?.agentStatus || application?.status || "none",
+      wallet: user?.agentWallet || {
+        availableBalance: 0,
+        lockedBalance: 0,
+        lifetimeEarned: 0,
+        lifetimeWithdrawn: 0,
       },
+    };
+
+    res.json({
+      agent,
       application,
       codes,
       recentLedger,
+      withdrawals,
+      isAgent: agent.isAgent,
+      agentStatus: agent.status,
+      agentWallet: agent.wallet,
+      promoCodes: codes,
     });
   } catch (error) {
     next(error);
@@ -98,8 +114,8 @@ router.get("/me", async (req, res, next) => {
 
 router.get("/promo-codes", async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id).select("isAgent");
-    if (!user?.isAgent) {
+    const user = await User.findById(req.user._id).select("isAgent agentStatus");
+    if (!(user?.isAgent || user?.agentStatus === "approved")) {
       throw new ValidationError("Only approved agents can view promo codes", "agent");
     }
 
@@ -118,8 +134,8 @@ router.post("/withdrawals", validateRequest(withdrawalSchema), async (req, res, 
     const minThreshold = Number(process.env.AGENT_WITHDRAWAL_THRESHOLD || 5000);
     const amount = Number(req.body.amount);
 
-    const user = await User.findById(req.user._id).select("isAgent agentWallet");
-    if (!user?.isAgent) {
+    const user = await User.findById(req.user._id).select("isAgent agentStatus agentWallet");
+    if (!(user?.isAgent || user?.agentStatus === "approved")) {
       throw new ValidationError("Only approved agents can request withdrawals", "agent");
     }
 

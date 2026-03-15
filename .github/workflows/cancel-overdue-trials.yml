@@ -1,0 +1,21 @@
+name: Cancel Overdue Trials
+
+on:
+  schedule:
+    - cron: "15 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  cancel-overdue-trials:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger overdue trial cancellation
+        env:
+          API_BASE_URL: ${{ secrets.FARMCONNECT_API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.FARMCONNECT_CRON_SECRET }}
+        run: |
+          set -e
+          curl --fail --show-error --silent \
+            -X POST "${API_BASE_URL}/api/cron/cancel-overdue" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -H "Content-Type: application/json"

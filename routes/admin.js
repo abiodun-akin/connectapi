@@ -3,6 +3,7 @@ const router = express.Router();
 const User = require("../user");
 const Message = require("../message");
 const Subscription = require("../subscription");
+const AgentApplication = require("../agentApplication");
 const bcrypt = require("bcryptjs");
 const validator = require("validator");
 const {
@@ -411,21 +412,49 @@ router.post("/users/:userId/record-violation", async (req, res, next) => {
  */
 router.get("/dashboard", async (req, res, next) => {
   try {
-    const totalUsers = await User.countDocuments();
-    const suspendedUsers = await User.countDocuments({ isSuspended: true });
-    const usersWithViolations = await User.countDocuments({
-      violationCount: { $gt: 0 },
-    });
-    const usersWithFlaggedMessages = await User.countDocuments({
-      flaggedMessageCount: { $gt: 0 },
-    });
-    const flaggedMessages = await Message.countDocuments({
-      status: "flagged",
-    });
-    const recentlyFlaggedMessages = await Message.countDocuments({
-      status: "flagged",
-      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-    });
+    const [
+      totalUsers,
+      suspendedUsers,
+      usersWithViolations,
+      usersWithFlaggedMessages,
+      flaggedMessages,
+      recentlyFlaggedMessages,
+      approvedAgents,
+      pendingAgentApplications,
+      declinedAgentApplications,
+      agentWalletTotals,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ isSuspended: true }),
+      User.countDocuments({ violationCount: { $gt: 0 } }),
+      User.countDocuments({ flaggedMessageCount: { $gt: 0 } }),
+      Message.countDocuments({ status: "flagged" }),
+      Message.countDocuments({
+        status: "flagged",
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      }),
+      User.countDocuments({ isAgent: true, agentStatus: "approved" }),
+      AgentApplication.countDocuments({ status: "pending" }),
+      AgentApplication.countDocuments({ status: "declined" }),
+      User.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalLifetimeEarned: { $sum: "$agentWallet.lifetimeEarned" },
+            totalAvailableBalance: { $sum: "$agentWallet.availableBalance" },
+            totalLockedBalance: { $sum: "$agentWallet.lockedBalance" },
+            totalLifetimeWithdrawn: { $sum: "$agentWallet.lifetimeWithdrawn" },
+          },
+        },
+      ]),
+    ]);
+
+    const walletOverview = agentWalletTotals[0] || {
+      totalLifetimeEarned: 0,
+      totalAvailableBalance: 0,
+      totalLockedBalance: 0,
+      totalLifetimeWithdrawn: 0,
+    };
 
     res.json({
       overview: {
@@ -433,6 +462,13 @@ router.get("/dashboard", async (req, res, next) => {
         suspendedUsers,
         usersWithViolations,
         usersWithFlaggedMessages,
+        approvedAgents,
+        pendingAgentApplications,
+        declinedAgentApplications,
+        totalAgentLifetimeEarned: walletOverview.totalLifetimeEarned || 0,
+        totalAgentAvailableBalance: walletOverview.totalAvailableBalance || 0,
+        totalAgentLockedBalance: walletOverview.totalLockedBalance || 0,
+        totalAgentLifetimeWithdrawn: walletOverview.totalLifetimeWithdrawn || 0,
       },
       messages: {
         totalFlagged: flaggedMessages,
