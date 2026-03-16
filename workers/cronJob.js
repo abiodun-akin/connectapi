@@ -3,6 +3,7 @@ const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail = process.env.RESEND_FROM_EMAIL || 'noreply@farmconnect.com';
+const isProduction = process.env.NODE_ENV === 'production';
 
 const isRabbitConnectionError = (error) => {
   const code = String(error?.code || '').toLowerCase();
@@ -92,6 +93,14 @@ const sendEmail = async (email, eventType, data) => {
 
 const processMessages = async () => {
   if (!process.env.RABBITMQ_URL) {
+    if (process.env.RABBITMQ_HTTP_API) {
+      console.warn('[Cron] RABBITMQ_HTTP_API is set but RABBITMQ_URL is missing. Use AMQP/AMQPS URL for queue processing.');
+    }
+
+    if (isProduction) {
+      throw new Error('RABBITMQ_URL is required in production to process notifications');
+    }
+
     console.warn('[Cron] RABBITMQ_URL is not set, skipping notification queue drain');
     return 0;
   }
@@ -135,6 +144,10 @@ const processMessages = async () => {
     return processed;
   } catch (error) {
     if (isRabbitConnectionError(error)) {
+      if (isProduction) {
+        throw new Error(`RabbitMQ connection failed in production: ${error.message}`);
+      }
+
       console.warn('[Cron] RabbitMQ unavailable, skipping notification queue drain:', error.message);
       return 0;
     }
