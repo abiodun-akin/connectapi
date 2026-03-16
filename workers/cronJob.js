@@ -4,6 +4,22 @@ const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail = process.env.RESEND_FROM_EMAIL || 'noreply@farmconnect.com';
 
+const isRabbitConnectionError = (error) => {
+  const code = String(error?.code || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  const stack = `${code} ${message}`;
+
+  return [
+    'econnrefused',
+    'enotfound',
+    'eai_again',
+    'socket closed unexpectedly',
+    'authentication failure',
+    'access refused',
+    'getaddrinfo',
+  ].some((token) => stack.includes(token));
+};
+
 const emailTemplates = {
   'auth.signup': {
     subject: 'Welcome to Farm Connect!',
@@ -75,6 +91,11 @@ const sendEmail = async (email, eventType, data) => {
 };
 
 const processMessages = async () => {
+  if (!process.env.RABBITMQ_URL) {
+    console.warn('[Cron] RABBITMQ_URL is not set, skipping notification queue drain');
+    return 0;
+  }
+
   try {
     const connection = await amqplib.connect(process.env.RABBITMQ_URL);
     const channel = await connection.createChannel();
@@ -113,6 +134,11 @@ const processMessages = async () => {
     await connection.close();
     return processed;
   } catch (error) {
+    if (isRabbitConnectionError(error)) {
+      console.warn('[Cron] RabbitMQ unavailable, skipping notification queue drain:', error.message);
+      return 0;
+    }
+
     console.error('Cron job failed:', error);
     throw error;
   }
