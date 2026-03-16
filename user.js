@@ -31,6 +31,20 @@ const userSchema = new mongoose.Schema(
       escape: true,
       select: false,
     },
+    googleId: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
+    microsoftId: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true,
+      index: true,
+    },
     // Admin status
     isAdmin: {
       type: Boolean,
