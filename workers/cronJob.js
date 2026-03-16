@@ -68,18 +68,18 @@ const sendEmail = async (email, eventType, data) => {
   try {
     if (!email) {
       console.warn(`[Email] Skipping ${eventType}: missing recipient email | data: ${JSON.stringify(data)}`);
-      return;
+      return false;
     }
 
     const template = emailTemplates[eventType];
     if (!template) {
       console.warn(`[Email] No template found for event type: ${eventType} — skipping`);
-      return;
+      return false;
     }
 
     if (!process.env.RESEND_API_KEY) {
       console.error('[Email] RESEND_API_KEY not set — cannot send email');
-      return;
+      return false;
     }
 
     const htmlContent = typeof template.html === 'function'
@@ -96,11 +96,14 @@ const sendEmail = async (email, eventType, data) => {
 
     if (result?.error) {
       console.error(`[Email] Resend returned error for ${eventType} to ${email}:`, JSON.stringify(result.error));
+      return false;
     } else {
       console.log(`[Email] Sent ${eventType} to ${email} | Resend id: ${result?.data?.id || 'unknown'}`);
+      return true;
     }
   } catch (error) {
     console.error(`[Email] Exception sending ${eventType} to ${email}:`, error.message);
+    return false;
   }
 };
 
@@ -147,7 +150,13 @@ const processMessages = async () => {
         const data = JSON.parse(msg.content.toString());
         const eventType = msg.fields.routingKey;
         console.log(`[Cron] Dequeued ${eventType} from ${queueName} | email: ${data.email || 'n/a'}`);
-        await sendEmail(data.email, eventType, data);
+        const sent = await sendEmail(data.email, eventType, data);
+        if (!sent) {
+          // Leave message unacked so it is requeued when connection closes.
+          console.warn(`[Cron] Delivery failed for ${eventType} from ${queueName}; stopping queue drain to retry later`);
+          break;
+        }
+
         channel.ack(msg);
         processed++;
         msg = await channel.get(queueName);

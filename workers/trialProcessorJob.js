@@ -8,10 +8,7 @@ async function runTrialProcessorJob() {
   try {
     await initializeRabbitMQ();
 
-    await mongoose.connect(process.env.CONN_STR, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await mongoose.connect(process.env.CONN_STR);
 
     await processTrialExpirations();
     await cancelOverdueTrials();

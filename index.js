@@ -313,9 +313,8 @@ const startServer = async () => {
     await initializeRabbitMQ();
 
     await mongoose.connect(process.env.CONN_STR, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+        dbName: process.env.DB_NAME || undefined,
+      });
     console.log("MongoDB connected successfully");
 
     await ensureSuperAdmin();
