@@ -67,27 +67,40 @@ const emailTemplates = {
 const sendEmail = async (email, eventType, data) => {
   try {
     if (!email) {
-      console.warn(`Skipping ${eventType}: missing recipient email`);
+      console.warn(`[Email] Skipping ${eventType}: missing recipient email | data: ${JSON.stringify(data)}`);
       return;
     }
 
     const template = emailTemplates[eventType];
-    if (!template) return;
+    if (!template) {
+      console.warn(`[Email] No template found for event type: ${eventType} — skipping`);
+      return;
+    }
+
+    if (!process.env.RESEND_API_KEY) {
+      console.error('[Email] RESEND_API_KEY not set — cannot send email');
+      return;
+    }
 
     const htmlContent = typeof template.html === 'function'
       ? template.html(data)
       : template.html;
 
-    await resend.emails.send({
+    console.log(`[Email] Sending ${eventType} to ${email} via Resend (from: ${senderEmail})`);
+    const result = await resend.emails.send({
       from: senderEmail,
       to: email,
       subject: template.subject,
       html: htmlContent,
     });
 
-    console.log(`Email sent for ${eventType} to ${email}`);
+    if (result?.error) {
+      console.error(`[Email] Resend returned error for ${eventType} to ${email}:`, JSON.stringify(result.error));
+    } else {
+      console.log(`[Email] Sent ${eventType} to ${email} | Resend id: ${result?.data?.id || 'unknown'}`);
+    }
   } catch (error) {
-    console.error('Failed to send email:', error.message);
+    console.error(`[Email] Exception sending ${eventType} to ${email}:`, error.message);
   }
 };
 
@@ -123,11 +136,17 @@ const processMessages = async () => {
 
     let processed = 0;
 
+    console.log(`[Cron] Queue depths — auth: ${authQueue.messageCount}, payment: ${paymentQueue.messageCount}, trial: ${trialQueue.messageCount}`);
+
     const processQueue = async (queueName) => {
       let msg = await channel.get(queueName);
+      if (!msg) {
+        console.log(`[Cron] Queue ${queueName} is empty`);
+      }
       while (msg) {
         const data = JSON.parse(msg.content.toString());
         const eventType = msg.fields.routingKey;
+        console.log(`[Cron] Dequeued ${eventType} from ${queueName} | email: ${data.email || 'n/a'}`);
         await sendEmail(data.email, eventType, data);
         channel.ack(msg);
         processed++;
@@ -139,7 +158,7 @@ const processMessages = async () => {
     await processQueue(paymentQueue.queue);
     await processQueue(trialQueue.queue);
 
-    console.log(`Processed ${processed} messages`);
+    console.log(`[Cron] Finished — processed ${processed} messages`);
     await connection.close();
     return processed;
   } catch (error) {
