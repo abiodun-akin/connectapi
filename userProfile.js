@@ -22,6 +22,12 @@ const userProfileSchema = new mongoose.Schema(
 
     // Common fields
     phone: String,
+    country: {
+      type: String,
+      default: "Nigeria",
+      trim: true,
+      index: true,
+    },
     location: String,
     state: String,
     lga: String, // Local Government Area (for Nigeria)
@@ -68,6 +74,8 @@ const userProfileSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+userProfileSchema.index({ profileType: 1, country: 1, state: 1, isProfileComplete: 1 });
 
 // Static methods
 userProfileSchema.statics.createUserProfile = async function (userId, profileType) {

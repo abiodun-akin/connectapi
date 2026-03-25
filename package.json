@@ -9,6 +9,7 @@
     "worker": "node workers/notificationWorker.js",
     "cron": "node workers/cronJob.js",
     "trial:process": "node workers/trialProcessorJob.js",
+    "seed:demo-matches": "node scripts/seedDemoMatches.js",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --detectOpenHandles",

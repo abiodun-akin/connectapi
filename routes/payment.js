@@ -60,7 +60,7 @@ router.post(
       const reference = `ref_${req.user._id}_${Date.now()}`;
 
       // Create payment record
-      const paymentRecord = await PaymentRecord.createPaymentRecord({
+      const _paymentRecord = await PaymentRecord.createPaymentRecord({
         user_id: req.user._id,
         reference,
         plan,

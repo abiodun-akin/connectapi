@@ -10,7 +10,13 @@ const { NotFoundError, ValidationError } = require("../errors/AppError");
  * Get matches for current user (farmers get vendor matches, vendors get farmer matches)
  */
 router.get("/", async (req, res, next) => {
-  const { status, limit = 10, page = 1 } = req.query;
+  const {
+    status,
+    limit = 10,
+    page = 1,
+    country,
+    state,
+  } = req.query;
 
   try {
     const userProfile = await UserProfile.findOne({ user_id: req.user._id });
@@ -22,7 +28,11 @@ router.get("/", async (req, res, next) => {
       });
     }
 
-    let query = {};
+    const query = {};
+    const normalizedCountry = String(country || "").trim();
+    const normalizedState = String(state || "").trim();
+    const targetProfileType = userProfile.profileType === "farmer" ? "vendor" : "farmer";
+    const targetMatchField = userProfile.profileType === "farmer" ? "vendor_id" : "farmer_id";
 
     if (userProfile.profileType === "farmer") {
       query.farmer_id = req.user._id;
@@ -34,6 +44,41 @@ router.get("/", async (req, res, next) => {
       query.status = status;
     } else {
       query.status = { $in: ["potential", "interested", "connected"] };
+    }
+
+    if (normalizedCountry || normalizedState) {
+      const profileFilter = {
+        profileType: targetProfileType,
+        isProfileComplete: true,
+      };
+
+      if (normalizedCountry) {
+        profileFilter.country = normalizedCountry;
+      }
+
+      if (normalizedState) {
+        profileFilter.state = { $regex: normalizedState, $options: "i" };
+      }
+
+      const profileUserIds = await UserProfile.find(profileFilter).distinct("user_id");
+
+      if (profileUserIds.length === 0) {
+        return res.json({
+          matches: [],
+          pagination: {
+            total: 0,
+            page: parseInt(page, 10),
+            limit: parseInt(limit, 10),
+            pages: 0,
+          },
+          appliedFilters: {
+            country: normalizedCountry || null,
+            state: normalizedState || null,
+          },
+        });
+      }
+
+      query[targetMatchField] = { $in: profileUserIds };
     }
 
     const skip = (page - 1) * limit;
@@ -73,6 +118,7 @@ router.get("/", async (req, res, next) => {
           },
           userProfile: matchedProfile && {
             profileType: matchedProfile.profileType,
+            country: matchedProfile.country,
             location: matchedProfile.location,
             state: matchedProfile.state,
             bio: matchedProfile.bio,
@@ -98,6 +144,10 @@ router.get("/", async (req, res, next) => {
         page: parseInt(page),
         limit: parseInt(limit),
         pages: Math.ceil(total / limit),
+      },
+      appliedFilters: {
+        country: normalizedCountry || null,
+        state: normalizedState || null,
       },
     });
   } catch (error) {

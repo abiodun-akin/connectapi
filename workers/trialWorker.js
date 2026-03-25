@@ -148,6 +148,77 @@ async function processTrialExpirations() {
 }
 
 /**
+ * Send renewal reminders for active subscriptions due in the next 3 days.
+ * Uses paymentReminderLastRenewalDate to avoid duplicate reminders.
+ */
+async function processPaymentReminders() {
+  try {
+    const now = new Date();
+    const reminderWindowEnd = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    const subscriptions = await Subscription.find({
+      status: "active",
+      autoRenewal: true,
+      renewalDate: {
+        $gte: now,
+        $lte: reminderWindowEnd,
+      },
+    });
+
+    let remindersSent = 0;
+
+    for (const subscription of subscriptions) {
+      try {
+        if (!subscription.renewalDate) continue;
+
+        if (
+          subscription.paymentReminderLastRenewalDate
+          && subscription.paymentReminderLastRenewalDate.getTime()
+            === new Date(subscription.renewalDate).getTime()
+        ) {
+          continue;
+        }
+
+        const user = await User.findById(subscription.user_id);
+        if (!user) continue;
+
+        const daysUntilRenewal = Math.max(
+          0,
+          Math.ceil((new Date(subscription.renewalDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
+        );
+
+        await publishEvent("payment_events", "payment.reminder", {
+          userId: user._id,
+          email: user.email,
+          subscriptionId: subscription._id,
+          plan: subscription.plan,
+          amount: subscription.amount,
+          renewalDate: subscription.renewalDate,
+          daysUntilRenewal,
+        });
+
+        subscription.paymentReminderSentAt = new Date();
+        subscription.paymentReminderLastRenewalDate = subscription.renewalDate;
+        await subscription.save();
+
+        remindersSent += 1;
+      } catch (error) {
+        console.error(
+          `[Trial Worker] Error sending payment reminder for subscription ${subscription._id}:`,
+          error
+        );
+      }
+    }
+
+    console.log(`[Trial Worker] Payment reminders sent: ${remindersSent}`);
+    return remindersSent;
+  } catch (error) {
+    console.error("[Trial Worker] Fatal error in processPaymentReminders:", error);
+    return 0;
+  }
+}
+
+/**
  * Get trial status for dashboard
  */
 async function getTrialStatus(userId) {
@@ -197,7 +268,7 @@ async function cancelOverdueTrials() {
 
     for (const subscription of overdueTrials) {
       try {
-        const cancelled = await Subscription.cancelSubscription(
+        await Subscription.cancelSubscription(
           subscription.user_id,
           "Trial period expired - payment required date passed"
         );
@@ -225,6 +296,7 @@ async function cancelOverdueTrials() {
 
 module.exports = {
   processTrialExpirations,
+  processPaymentReminders,
   getTrialStatus,
   cancelOverdueTrials,
 };

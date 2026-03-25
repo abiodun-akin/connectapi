@@ -6,7 +6,11 @@
 
 const express = require("express");
 const router = express.Router();
-const { processTrialExpirations, cancelOverdueTrials } = require("../workers/trialWorker");
+const {
+  processTrialExpirations,
+  processPaymentReminders,
+  cancelOverdueTrials,
+} = require("../workers/trialWorker");
 const { processMessages } = require("../workers/cronJob");
 
 // Middleware to verify cron secret
@@ -34,9 +38,11 @@ router.post("/process-trials", verifyCronSecret, async (req, res) => {
     console.log("[Cron] Triggered: process-trials");
 
     await processTrialExpirations();
+    const paymentRemindersSent = await processPaymentReminders();
 
     res.json({
       message: "Trial expiration processing completed",
+      paymentRemindersSent,
       timestamp: new Date(),
     });
   } catch (error) {

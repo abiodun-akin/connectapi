@@ -6,7 +6,7 @@ const { AppError } = require('../errors/AppError');
 /**
  * Error handling middleware - must be registered last
  */
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (err, req, res, _next) => {
   // Log error in development
   if (process.env.NODE_ENV !== 'production') {
     console.error('Error:', {

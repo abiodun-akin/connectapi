@@ -3,7 +3,7 @@
  * Tests for input validation rules
  */
 
-const { validationRules, validateRequest, createValidationSchema } = require('../validators/inputValidator');
+const { validationRules, createValidationSchema } = require('../validators/inputValidator');
 const { ValidationError } = require('../errors/AppError');
 
 describe('Input Validators', () => {

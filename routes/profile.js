@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const UserProfile = require("../userProfile");
 const Subscription = require("../subscription");
-const { validateRequest, validationRules } = require("../validators/inputValidator");
+const { AFRICAN_COUNTRY_SET } = require("../utils/africanCountries");
 const { ValidationError, NotFoundError } = require("../errors/AppError");
 
 /**
@@ -61,6 +61,10 @@ router.post("/farmer", async (req, res, next) => {
   const farmerData = req.body;
 
   try {
+    if (!farmerData.country || !AFRICAN_COUNTRY_SET.has(farmerData.country)) {
+      throw new ValidationError("Please select a valid African country", "country");
+    }
+
     // Validate top-level required fields
     if (!farmerData.phone) {
       throw new ValidationError("phone is required", "phone");
@@ -70,6 +74,9 @@ router.post("/farmer", async (req, res, next) => {
     }
     if (!farmerData.state) {
       throw new ValidationError("state is required", "state");
+    }
+    if (farmerData.country === "Nigeria" && !farmerData.lga) {
+      throw new ValidationError("lga is required for Nigeria", "lga");
     }
 
     // Validate nested farmerDetails fields
@@ -89,6 +96,7 @@ router.post("/farmer", async (req, res, next) => {
 
     const profile = await UserProfile.updateFarmerProfile(req.user._id, {
       phone: farmerData.phone,
+      country: farmerData.country,
       location: farmerData.location,
       state: farmerData.state,
       lga: farmerData.lga,
@@ -115,6 +123,10 @@ router.post("/vendor", async (req, res, next) => {
   const vendorData = req.body;
 
   try {
+    if (!vendorData.country || !AFRICAN_COUNTRY_SET.has(vendorData.country)) {
+      throw new ValidationError("Please select a valid African country", "country");
+    }
+
     // Validate top-level required fields
     if (!vendorData.phone) {
       throw new ValidationError("phone is required", "phone");
@@ -124,6 +136,9 @@ router.post("/vendor", async (req, res, next) => {
     }
     if (!vendorData.state) {
       throw new ValidationError("state is required", "state");
+    }
+    if (vendorData.country === "Nigeria" && !vendorData.lga) {
+      throw new ValidationError("lga is required for Nigeria", "lga");
     }
 
     // Validate nested vendorDetails fields
@@ -143,6 +158,7 @@ router.post("/vendor", async (req, res, next) => {
 
     const profile = await UserProfile.updateVendorProfile(req.user._id, {
       phone: vendorData.phone,
+      country: vendorData.country,
       location: vendorData.location,
       state: vendorData.state,
       lga: vendorData.lga,
@@ -209,6 +225,7 @@ router.get("/:userId", async (req, res, next) => {
     const publicProfile = {
       _id: profile._id,
       profileType: profile.profileType,
+      country: profile.country,
       location: profile.location,
       state: profile.state,
       bio: profile.bio,

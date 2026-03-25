@@ -1,5 +1,4 @@
 const moongoese = require("mongoose");
-const dotenv = require("dotenv");
 
 const dbConnect = () => {
   moongoese

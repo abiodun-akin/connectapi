@@ -70,7 +70,6 @@ function analyzeMessage(content) {
 
   let riskScore = 0;
   const flaggedPatterns = [];
-  const lowerContent = content.toLowerCase();
 
   // Check for suspicious patterns
   for (const category in suspiciousPatterns) {

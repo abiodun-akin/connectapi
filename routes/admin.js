@@ -12,7 +12,7 @@ const {
   getActivityReport,
   recordPaymentViolation,
 } = require("../utils/activityScorer");
-const { NotFoundError, UnauthorizedError, ValidationError } = require("../errors/AppError");
+const { NotFoundError, ValidationError } = require("../errors/AppError");
 
 // Middleware to verify admin access
 const verifyAdmin = async (req, res, next) => {

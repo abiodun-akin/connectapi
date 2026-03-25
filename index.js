@@ -18,8 +18,10 @@ const adminPaymentRoutes = require("./routes/adminPayment");
 const agentsRoutes = require("./routes/agents");
 const cronRoutes = require("./routes/cron");
 const requireAuth = require("./middleware/requireAuth");
+const requireFeatureAccess = require("./middleware/requireFeatureAccess");
 const getreport = require("./middleware/getreport");
 const errorHandler = require("./middleware/errorHandler");
+const { FEATURE_ACCESS } = require("./utils/subscriptionAccess");
 const Match = require("./match");
 const Message = require("./message");
 const { ensureSuperAdmin } = require("./utils/superAdminBootstrap");
@@ -30,7 +32,7 @@ const {
 
 const Report = require("./report");
 const { validateRequest, createValidationSchema } = require("./validators/inputValidator");
-const { NotFoundError, ValidationError } = require("./errors/AppError");
+const { NotFoundError } = require("./errors/AppError");
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -132,10 +134,20 @@ app.use("/api/payment", requireAuth, paymentRoutes);
 app.use("/api/profile", requireAuth, profileRoutes);
 
 // Matches routes (require authentication)
-app.use("/api/matches", requireAuth, matchesRoutes);
+app.use(
+  "/api/matches",
+  requireAuth,
+  requireFeatureAccess(FEATURE_ACCESS.CORE),
+  matchesRoutes
+);
 
 // Messages routes (require authentication)
-app.use("/api/messages", requireAuth, messagesRoutes);
+app.use(
+  "/api/messages",
+  requireAuth,
+  requireFeatureAccess(FEATURE_ACCESS.CORE),
+  messagesRoutes
+);
 
 // Admin routes (require authentication and admin status)
 app.use("/api/admin", requireAuth, adminRoutes);
@@ -222,91 +234,156 @@ app.use((req, res) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-io.use((socket, next) => {
-  try {
-    const tokenFromAuth = socket.handshake.auth?.token;
-    const authHeader = socket.handshake.headers?.authorization;
-    const tokenFromHeader = authHeader?.split(" ")[1];
-    const token = tokenFromAuth || tokenFromHeader;
-
-    if (!token) {
-      return next(new Error("Authentication required"));
-    }
-
-    const decoded = jwt.verify(
-      token,
-      process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
-    );
-    socket.userId = decoded.id;
-    return next();
-  } catch (error) {
-    return next(new Error("Invalid or expired token"));
-  }
-});
-
-io.on("connection", (socket) => {
-  socket.on("join-conversation", async ({ matchId }) => {
+const registerRealtimeHandlers = (ioInstance) => {
+  ioInstance.use((socket, next) => {
     try {
+      const tokenFromAuth = socket.handshake.auth?.token;
+      const authHeader = socket.handshake.headers?.authorization;
+      const tokenFromHeader = authHeader?.split(" ")[1];
+      const token = tokenFromAuth || tokenFromHeader;
+
+      if (!token) {
+        return next(new Error("Authentication required"));
+      }
+
+      const decoded = jwt.verify(
+        token,
+        process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
+      );
+      socket.userId = decoded.id;
+      return next();
+    } catch (error) {
+      return next(new Error("Invalid or expired token"));
+    }
+  });
+
+  ioInstance.on("connection", (socket) => {
+    const ensureConversationParticipant = async (matchId) => {
+      if (!matchId) return null;
+
+      const match = await Match.findById(matchId);
+      if (!match) return null;
+
+      const isParticipant =
+        match.farmer_id.toString() === socket.userId ||
+        match.vendor_id.toString() === socket.userId;
+
+      return isParticipant ? match : null;
+    };
+
+    socket.on("join-conversation", async ({ matchId }) => {
+      try {
+        const match = await ensureConversationParticipant(matchId);
+        if (!match) return;
+        socket.join(`match:${matchId}`);
+      } catch (error) {
+        console.error("join-conversation error:", error.message);
+      }
+    });
+
+    socket.on("leave-conversation", ({ matchId }) => {
       if (!matchId) return;
-      const match = await Match.findById(matchId);
-      if (!match) return;
+      socket.leave(`match:${matchId}`);
+    });
 
-      const isParticipant =
-        match.farmer_id.toString() === socket.userId ||
-        match.vendor_id.toString() === socket.userId;
+    socket.on("send-message", async ({ matchId, content, attachment }) => {
+      try {
+        const normalizedContent = String(content || "").trim();
+        if (!matchId || (!normalizedContent && !attachment)) return;
+        if (normalizedContent.length > 5000) return;
 
-      if (!isParticipant) return;
-      socket.join(`match:${matchId}`);
-    } catch (error) {
-      console.error("join-conversation error:", error.message);
-    }
+        const match = await ensureConversationParticipant(matchId);
+        if (!match) return;
+        if (!["interested", "connected"].includes(match.status)) return;
+
+        const recipient_id =
+          match.farmer_id.toString() === socket.userId
+            ? match.vendor_id
+            : match.farmer_id;
+
+        const message = await Message.sendMessage({
+          sender_id: socket.userId,
+          recipient_id,
+          match_id: matchId,
+          content: normalizedContent,
+          attachment,
+        });
+
+        ioInstance.to(`match:${matchId}`).emit("new-message", {
+          _id: message._id,
+          match_id: message.match_id,
+          sender_id: message.sender_id,
+          recipient_id: message.recipient_id,
+          content: message.content,
+          attachment: message.attachment || null,
+          status: message.status,
+          createdAt: message.createdAt,
+        });
+      } catch (error) {
+        console.error("send-message error:", error.message);
+      }
+    });
+
+    socket.on("typing:start", async ({ matchId }) => {
+      try {
+        const match = await ensureConversationParticipant(matchId);
+        if (!match) return;
+
+        socket.to(`match:${matchId}`).emit("typing:start", {
+          matchId,
+          userId: socket.userId,
+        });
+      } catch (error) {
+        console.error("typing:start error:", error.message);
+      }
+    });
+
+    socket.on("typing:stop", async ({ matchId }) => {
+      try {
+        const match = await ensureConversationParticipant(matchId);
+        if (!match) return;
+
+        socket.to(`match:${matchId}`).emit("typing:stop", {
+          matchId,
+          userId: socket.userId,
+        });
+      } catch (error) {
+        console.error("typing:stop error:", error.message);
+      }
+    });
+
+    socket.on("mark-read", async ({ matchId }) => {
+      try {
+        const match = await ensureConversationParticipant(matchId);
+        if (!match) return;
+
+        const readAt = new Date();
+        const result = await Message.updateMany(
+          {
+            match_id: matchId,
+            recipient_id: socket.userId,
+            status: "sent",
+          },
+          {
+            status: "read",
+          }
+        );
+
+        if ((result.modifiedCount || 0) > 0) {
+          ioInstance.to(`match:${matchId}`).emit("messages-read", {
+            matchId,
+            readerId: socket.userId,
+            readAt,
+          });
+        }
+      } catch (error) {
+        console.error("mark-read error:", error.message);
+      }
+    });
   });
+};
 
-  socket.on("leave-conversation", ({ matchId }) => {
-    if (!matchId) return;
-    socket.leave(`match:${matchId}`);
-  });
-
-  socket.on("send-message", async ({ matchId, content }) => {
-    try {
-      if (!matchId || !content || !content.trim()) return;
-
-      const match = await Match.findById(matchId);
-      if (!match) return;
-
-      const isParticipant =
-        match.farmer_id.toString() === socket.userId ||
-        match.vendor_id.toString() === socket.userId;
-
-      if (!isParticipant) return;
-      if (!["interested", "connected"].includes(match.status)) return;
-
-      const recipient_id =
-        match.farmer_id.toString() === socket.userId
-          ? match.vendor_id
-          : match.farmer_id;
-
-      const message = await Message.sendMessage({
-        sender_id: socket.userId,
-        recipient_id,
-        match_id: matchId,
-        content: content.trim(),
-      });
-
-      io.to(`match:${matchId}`).emit("new-message", {
-        _id: message._id,
-        match_id: message.match_id,
-        sender_id: message.sender_id,
-        recipient_id: message.recipient_id,
-        content: message.content,
-        status: message.status,
-        createdAt: message.createdAt,
-      });
-    } catch (error) {
-      console.error("send-message error:", error.message);
-    }
-  });
-});
+registerRealtimeHandlers(io);
 
 const startServer = async () => {
   try {
@@ -328,4 +405,14 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  server,
+  io,
+  startServer,
+  registerRealtimeHandlers,
+};

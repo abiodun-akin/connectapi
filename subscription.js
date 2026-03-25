@@ -62,6 +62,14 @@ const subscriptionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    paymentReminderSentAt: {
+      type: Date,
+      default: null,
+    },
+    paymentReminderLastRenewalDate: {
+      type: Date,
+      default: null,
+    },
     hasUsedActiveTopup: {
       type: Boolean,
       default: false,

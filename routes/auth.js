@@ -10,7 +10,11 @@ const PromoCode = require("../promoCode");
 const AgentLedger = require("../agentLedger");
 const UserProfile = require("../userProfile");
 const { publishEvent } = require("../middleware/eventNotification");
-const { validateRequest, createValidationSchema } = require("../validators/inputValidator");
+const {
+  validateRequest,
+  createValidationSchema,
+  validationRules,
+} = require("../validators/inputValidator");
 const {
   AuthenticationError,
   AuthorizationError,
@@ -21,6 +25,22 @@ const {
 // Validation schemas
 const signupSchema = createValidationSchema("name", "email", "password");
 const loginSchema = createValidationSchema("email", "password");
+const forgotPasswordSchema = createValidationSchema("email");
+const resetPasswordSchema = {
+  token: (token) => {
+    if (!token || typeof token !== "string" || token.trim().length < 20) {
+      throw new ValidationError("Valid reset token is required", "token");
+    }
+  },
+  password: validationRules.password,
+};
+const verifyEmailSchema = {
+  token: (token) => {
+    if (!token || typeof token !== "string" || token.trim().length < 20) {
+      throw new ValidationError("Valid verification token is required", "token");
+    }
+  },
+};
 
 const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "1d";
 
@@ -62,6 +82,52 @@ const getFrontendCallbackUrl = (params = {}) => {
     }
   });
   return url.toString();
+};
+
+const getPasswordResetUrl = (token) => {
+  const url = new URL("/reset-password", getFrontendOrigin());
+  url.searchParams.set("token", token);
+  return url.toString();
+};
+
+const getEmailVerificationUrl = (token) => {
+  const url = new URL("/verify-email", getFrontendOrigin());
+  url.searchParams.set("token", token);
+  return url.toString();
+};
+
+const hashToken = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
+
+const buildAuthEventMetadata = (req, extra = {}) => {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  const ipAddress = forwardedFor || req.ip || req.socket?.remoteAddress || null;
+
+  return {
+    timestamp: new Date().toISOString(),
+    ipAddress,
+    userAgent: req.get("user-agent") || null,
+    requestId:
+      req.get("x-request-id")
+      || req.get("x-correlation-id")
+      || crypto.randomUUID(),
+    method: req.method,
+    path: req.originalUrl,
+    location: {
+      country:
+        req.get("cf-ipcountry")
+        || req.get("x-vercel-ip-country")
+        || req.get("x-country")
+        || null,
+      region:
+        req.get("x-vercel-ip-country-region")
+        || req.get("x-region")
+        || null,
+      city: req.get("x-vercel-ip-city") || req.get("x-city") || null,
+    },
+    ...extra,
+  };
 };
 
 const getSocialProviderConfig = (provider, req) => {
@@ -186,6 +252,14 @@ const resolveAuthenticatedSession = async (req) => {
 
   if (user.isSuspended) {
     throw new AuthorizationError("Account suspended");
+  }
+
+  if (
+    user.passwordChangedAt
+    && decodedToken.iat
+    && user.passwordChangedAt.getTime() > decodedToken.iat * 1000
+  ) {
+    throw new AuthorizationError("Password changed. Please login again.");
   }
 
   return { user, token };
@@ -346,6 +420,7 @@ router.post("/signup", validateRequest(signupSchema), async (req, res, next) => 
   try {
     const user = await User.signup({ name, email, password });
     user.lastLogin = new Date();
+    const verifyToken = user.createEmailVerificationToken();
     await user.save();
 
     await ensureTrialSubscription(user._id);
@@ -363,6 +438,17 @@ router.post("/signup", validateRequest(signupSchema), async (req, res, next) => 
       name: user.name,
       promoCode: promoAttribution?.code || null,
       rebateAmount: promoAttribution?.rebateAmount || 0,
+      ...buildAuthEventMetadata(req, {
+        authMethod: "password",
+      }),
+    });
+
+    publishEvent("auth_events", "auth.email_verification_requested", {
+      userId: user._id,
+      email: user.email,
+      name: user.name,
+      verifyUrl: getEmailVerificationUrl(verifyToken),
+      expiresInHours: 24,
     });
 
     res.status(201).json({
@@ -401,6 +487,9 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
     publishEvent("auth_events", "auth.login", {
       userId: user._id,
       email: user.email,
+      ...buildAuthEventMetadata(req, {
+        authMethod: "password",
+      }),
     });
 
     res.json({
@@ -412,6 +501,83 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
     next(new AuthenticationError("Invalid email or password"));
   }
 });
+
+router.post(
+  "/forgot-password",
+  validateRequest(forgotPasswordSchema),
+  async (req, res, next) => {
+    const { email } = req.body;
+    const responseMessage = "If an account exists for that email, a password reset link has been sent.";
+
+    try {
+      const user = await User.findOne({ email: String(email).trim().toLowerCase() });
+
+      if (user) {
+        const resetToken = user.createPasswordResetToken();
+        await user.save();
+
+        publishEvent("auth_events", "auth.password_reset_requested", {
+          userId: user._id,
+          email: user.email,
+          name: user.name,
+          resetUrl: getPasswordResetUrl(resetToken),
+          expiresInMinutes: 30,
+          ...buildAuthEventMetadata(req, {
+            authMethod: "password_reset",
+          }),
+        });
+      }
+
+      res.json({ message: responseMessage });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post(
+  "/reset-password",
+  validateRequest(resetPasswordSchema),
+  async (req, res, next) => {
+    const { token, password } = req.body;
+
+    try {
+      const user = await User.findOne({
+        resetPasswordTokenHash: hashToken(token),
+        resetPasswordExpiresAt: { $gt: new Date() },
+      });
+
+      if (!user) {
+        throw new ValidationError("Reset link is invalid or has expired", "token");
+      }
+
+      user.password = await bcrypt.hash(password, 12);
+      user.passwordChangedAt = new Date();
+      user.resetPasswordTokenHash = null;
+      user.resetPasswordExpiresAt = null;
+      await user.save();
+
+      res.cookie("jwt", "", {
+        httpOnly: true,
+        maxAge: 0,
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      });
+
+      publishEvent("auth_events", "auth.password_reset_completed", {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        ...buildAuthEventMetadata(req, {
+          authMethod: "password_reset",
+        }),
+      });
+
+      res.json({ message: "Password reset successful. Please sign in again." });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 router.get("/session", async (req, res, next) => {
   try {
@@ -508,6 +674,9 @@ router.get("/social/:provider/callback", async (req, res) => {
       email: user.email,
       name: user.name,
       provider,
+      ...buildAuthEventMetadata(req, {
+        authMethod: provider,
+      }),
     });
 
     return res.redirect(
@@ -552,10 +721,86 @@ router.post("/logout", async (req, res) => {
   publishEvent("auth_events", "auth.logout", {
     userId: eventUser?._id || null,
     email: eventUser?.email || null,
-    timestamp: new Date(),
+    ...buildAuthEventMetadata(req, {
+      authMethod: "session",
+    }),
   });
 
   res.json({ message: "Logged out successfully" });
 });
+
+router.post("/send-verification", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+
+    if (user.isEmailVerified) {
+      return res.json({ message: "Email is already verified." });
+    }
+
+    const COOLDOWN_MS = 2 * 60 * 1000;
+    if (
+      user.emailVerificationLastSentAt &&
+      Date.now() - user.emailVerificationLastSentAt.getTime() < COOLDOWN_MS
+    ) {
+      const secondsLeft = Math.ceil(
+        (COOLDOWN_MS - (Date.now() - user.emailVerificationLastSentAt.getTime())) / 1000
+      );
+      return next(
+        new ValidationError(
+          `Please wait ${secondsLeft} seconds before requesting another verification email.`,
+          "cooldown"
+        )
+      );
+    }
+
+    const verifyToken = user.createEmailVerificationToken();
+    await user.save();
+
+    publishEvent("auth_events", "auth.email_verification_requested", {
+      userId: user._id,
+      email: user.email,
+      name: user.name,
+      verifyUrl: getEmailVerificationUrl(verifyToken),
+      expiresInHours: 24,
+      ...buildAuthEventMetadata(req, { authMethod: "email_verification" }),
+    });
+
+    res.json({ message: "Verification email sent. Please check your inbox." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  "/verify-email",
+  validateRequest(verifyEmailSchema),
+  async (req, res, next) => {
+    const { token } = req.body;
+
+    try {
+      const tokenHash = hashToken(token);
+      const user = await User.findOne({
+        emailVerificationTokenHash: tokenHash,
+        emailVerificationExpiresAt: { $gt: new Date() },
+      });
+
+      if (!user) {
+        throw new ValidationError(
+          "Verification link is invalid or has expired.",
+          "token"
+        );
+      }
+
+      user.isEmailVerified = true;
+      user.emailVerificationTokenHash = null;
+      user.emailVerificationExpiresAt = null;
+      await user.save();
+
+      res.json({ message: "Email verified successfully. You can now sign in." });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 module.exports = router;

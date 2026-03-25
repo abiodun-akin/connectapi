@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const validator = require("validator");
@@ -116,6 +117,34 @@ const userSchema = new mongoose.Schema(
         default: 0,
       },
     },
+    resetPasswordTokenHash: {
+      type: String,
+      default: null,
+    },
+    resetPasswordExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    emailVerificationLastSentAt: {
+      type: Date,
+      default: null,
+    },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
     // Last login tracking
     lastLogin: Date,
   },
@@ -180,6 +209,27 @@ userSchema.statics.login = async function ({ email, password }) {
   }
 
   return user;
+};
+
+userSchema.methods.createPasswordResetToken = function () {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  this.resetPasswordTokenHash = crypto
+    .createHash("sha256")
+    .update(rawToken)
+    .digest("hex");
+  this.resetPasswordExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  return rawToken;
+};
+
+userSchema.methods.createEmailVerificationToken = function () {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  this.emailVerificationTokenHash = crypto
+    .createHash("sha256")
+    .update(rawToken)
+    .digest("hex");
+  this.emailVerificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  this.emailVerificationLastSentAt = new Date();
+  return rawToken;
 };
 
 userSchema.options.toJSON.transform = (doc, ret) => {

@@ -244,7 +244,7 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
       const refundData = refundResponse.data.data;
 
       // Update payment record
-      const updatedPayment = await PaymentRecord.completeRefund(
+      await PaymentRecord.completeRefund(
         payment._id,
         refundData.reference
       );

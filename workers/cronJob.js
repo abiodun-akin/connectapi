@@ -21,18 +21,69 @@ const isRabbitConnectionError = (error) => {
   ].some((token) => stack.includes(token));
 };
 
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const formatTimestamp = (value) => {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return 'Unavailable';
+  return `${date.toISOString()} UTC`;
+};
+
+const formatLocation = (location = {}) => {
+  const city = location?.city;
+  const region = location?.region;
+  const country = location?.country;
+  const parts = [city, region, country].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'Unavailable';
+};
+
+const renderAuthSecurityDetails = (data = {}) => {
+  const rows = [
+    ['Time', formatTimestamp(data.timestamp)],
+    ['IP Address', data.ipAddress || 'Unavailable'],
+    ['Location', formatLocation(data.location)],
+    ['Auth Method', data.authMethod || data.provider || 'Unavailable'],
+    ['User Agent', data.userAgent || 'Unavailable'],
+    ['Request ID', data.requestId || 'Unavailable'],
+    ['Route', data.path ? `${data.method || 'UNKNOWN'} ${data.path}` : 'Unavailable'],
+  ];
+
+  const renderedRows = rows
+    .map(([label, value]) => `<tr><td style="padding:6px 10px;border:1px solid #ddd;"><strong>${escapeHtml(label)}</strong></td><td style="padding:6px 10px;border:1px solid #ddd;">${escapeHtml(value)}</td></tr>`)
+    .join('');
+
+  return `<table style="border-collapse:collapse;width:100%;max-width:720px;margin-top:12px;">${renderedRows}</table>`;
+};
+
 const emailTemplates = {
   'auth.signup': {
-    subject: 'Welcome to Farm Connect!',
-    html: '<h1>Welcome!</h1><p>Your account has been created successfully.</p>',
+    subject: 'Welcome to Farm Connect - Security Activity Log',
+    html: (data) => `<h1>Welcome to Farm Connect</h1><p>Your account was created successfully. Keep this activity record for your security monitoring.</p>${renderAuthSecurityDetails(data)}<p style="margin-top:14px;">If this was not you, reset your password immediately and contact support.</p>`,
   },
   'auth.login': {
-    subject: 'Login Successful',
-    html: '<h1>Login Successful</h1><p>You have logged in to your account.</p>',
+    subject: 'Security Notice: New Login Detected',
+    html: (data) => `<h1>Login Successful</h1><p>We detected a sign-in to your Farm Connect account.</p>${renderAuthSecurityDetails(data)}<p style="margin-top:14px;">If this login was not initiated by you, change your password now and revoke active sessions.</p>`,
   },
   'auth.logout': {
-    subject: 'Logged Out',
-    html: '<h1>Logged Out</h1><p>You have been logged out.</p>',
+    subject: 'Security Notice: Logout Recorded',
+    html: (data) => `<h1>Logged Out</h1><p>Your account session was closed.</p>${renderAuthSecurityDetails(data)}<p style="margin-top:14px;">If you did not perform this action, secure your account immediately.</p>`,
+  },
+  'auth.password_reset_requested': {
+    subject: 'Password Reset Requested',
+    html: (data) => `<h1>Password Reset Request</h1><p>We received a request to reset your Farm Connect password.</p><p><a href="${escapeHtml(data.resetUrl)}" style="display:inline-block;padding:10px 16px;background:#14532d;color:#fff;text-decoration:none;border-radius:6px;">Reset Password</a></p><p>This link expires in ${escapeHtml(data.expiresInMinutes || 30)} minutes.</p>${renderAuthSecurityDetails(data)}<p style="margin-top:14px;">If you did not request this change, you can ignore this email and your password will remain unchanged.</p>`,
+  },
+  'auth.password_reset_completed': {
+    subject: 'Password Changed Successfully',
+    html: (data) => `<h1>Password Reset Successful</h1><p>Your Farm Connect password has been changed.</p>${renderAuthSecurityDetails(data)}<p style="margin-top:14px;">If this was not you, contact support immediately and secure your account.</p>`,
+  },
+  'auth.email_verification_requested': {
+    subject: 'Verify your Farm Connect email address',
+    html: (data) => `<h1>Verify Your Email</h1><p>Thanks for signing up! Please verify your Farm Connect email address by clicking the button below.</p><p><a href="${escapeHtml(data.verifyUrl)}" style="display:inline-block;padding:10px 16px;background:#14532d;color:#fff;text-decoration:none;border-radius:6px;">Verify Email</a></p><p>This link expires in ${escapeHtml(String(data.expiresInHours || 24))} hours.</p><p>If you did not create an account on Farm Connect, you can safely ignore this email.</p>`,
   },
   'payment.initialized': {
     subject: 'Payment Started',
@@ -45,6 +96,10 @@ const emailTemplates = {
   'payment.success': {
     subject: 'Payment Successful',
     html: '<h1>Payment Successful</h1><p>Your payment was completed successfully.</p>',
+  },
+  'payment.reminder': {
+    subject: 'Upcoming Subscription Renewal',
+    html: (data) => `<h1>Subscription Renewal Reminder</h1><p>Your ${escapeHtml(data.plan || "subscription")} plan will renew in ${escapeHtml(String(data.daysUntilRenewal ?? "a few"))} day(s).</p><p>Renewal date: ${escapeHtml(data.renewalDate ? new Date(data.renewalDate).toLocaleDateString() : "N/A")}</p><p>Amount: ₦${escapeHtml(Number(data.amount || 0).toLocaleString())}</p><p>If you already updated your billing preferences, no further action is required.</p>`,
   },
   'payment.closed': {
     subject: 'Payment Cancelled',

@@ -4,21 +4,26 @@ const Message = require("../message");
 const Match = require("../match");
 const User = require("../user");
 const { recordFlaggedMessage } = require("../utils/activityScorer");
-const { NotFoundError, ValidationError, UnauthorizedError } = require("../errors/AppError");
+const { NotFoundError, ValidationError } = require("../errors/AppError");
 
 /**
  * POST /api/messages/send
  * Send message (requires approved match)
  */
 router.post("/send", async (req, res, next) => {
-  const { match_id, content } = req.body;
+  const { match_id, content, attachment } = req.body;
 
   try {
-    if (!match_id || !content) {
-      throw new ValidationError("match_id and content are required", "match_id");
+    if (!match_id) {
+      throw new ValidationError("match_id is required", "match_id");
     }
 
-    if (content.trim().length === 0 || content.length > 5000) {
+    const normalizedContent = String(content || "").trim();
+    if (!normalizedContent && !attachment) {
+      throw new ValidationError("content or attachment is required", "content");
+    }
+
+    if (normalizedContent.length > 5000) {
       throw new ValidationError("Content must be between 1 and 5000 characters", "content");
     }
 
@@ -55,7 +60,8 @@ router.post("/send", async (req, res, next) => {
       sender_id: req.user._id,
       recipient_id,
       match_id,
-      content,
+      content: normalizedContent,
+      attachment,
     });
 
     res.status(201).json({
@@ -133,6 +139,69 @@ router.get("/conversations", async (req, res, next) => {
         page: parseInt(page),
         limit: parseInt(limit),
         pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/messages/:matchId/search
+ * Search messages in a conversation
+ */
+router.get("/:matchId/search", async (req, res, next) => {
+  const { q = "", limit = 20, page = 1 } = req.query;
+
+  try {
+    const searchTerm = String(q || "").trim();
+    if (searchTerm.length < 2) {
+      throw new ValidationError("Search query must be at least 2 characters", "q");
+    }
+
+    const match = await Match.findById(req.params.matchId);
+
+    if (!match) {
+      return next(new NotFoundError("Match"));
+    }
+
+    // Verify user is part of this match
+    if (
+      match.farmer_id.toString() !== req.user._id.toString()
+      && match.vendor_id.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        error: "Not authorized to search this conversation",
+        code: "UNAUTHORIZED",
+      });
+    }
+
+    const parsedLimit = parseInt(limit, 10);
+    const parsedPage = parseInt(page, 10);
+    const skip = (parsedPage - 1) * parsedLimit;
+    const searchFilter = {
+      match_id: req.params.matchId,
+      content: { $regex: searchTerm, $options: "i" },
+    };
+
+    const [messages, total] = await Promise.all([
+      Message.find(searchFilter)
+        .select("sender_id recipient_id content status createdAt")
+        .sort({ createdAt: -1 })
+        .limit(parsedLimit)
+        .skip(skip)
+        .exec(),
+      Message.countDocuments(searchFilter),
+    ]);
+
+    res.json({
+      query: searchTerm,
+      messages: messages.reverse(),
+      pagination: {
+        total,
+        page: parsedPage,
+        limit: parsedLimit,
+        pages: Math.ceil(total / parsedLimit),
       },
     });
   } catch (error) {

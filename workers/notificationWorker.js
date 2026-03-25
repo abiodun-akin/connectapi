@@ -33,7 +33,7 @@ const emailTemplates = {
   },
   "auth.login": {
     subject: "Login Successful",
-    html: (data) => `
+    html: (_data) => `
       <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
         <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
           <h1 style="color: #2c3e50;">Login Successful</h1>
@@ -47,7 +47,7 @@ const emailTemplates = {
   },
   "auth.logout": {
     subject: "Logged Out",
-    html: (data) => `
+    html: (_data) => `
       <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
         <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
           <h1 style="color: #2c3e50;">Logged Out</h1>
@@ -107,9 +107,25 @@ const emailTemplates = {
       </div>
     `,
   },
+  "payment.reminder": {
+    subject: "Upcoming Subscription Renewal - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #e67e22;">Renewal Reminder</h1>
+          <p style="color: #555; font-size: 16px;">Your <strong>${data.plan || "subscription"}</strong> plan will renew in <strong>${data.daysUntilRenewal ?? "a few"}</strong> day(s).</p>
+          <div style="margin: 20px 0; padding: 16px; background: #fef9e7; border-left: 4px solid #f39c12; border-radius: 4px;">
+            <p style="color: #555; margin: 5px 0;"><strong>Renewal Date:</strong> ${data.renewalDate ? new Date(data.renewalDate).toLocaleDateString() : "N/A"}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Amount:</strong> ₦${(data.amount || 0).toLocaleString()}</p>
+          </div>
+          <p style="color: #555; font-size: 15px;">No action is required if your card details are up to date.</p>
+        </div>
+      </div>
+    `,
+  },
   "payment.closed": {
     subject: "Payment Cancelled - Farm Connect",
-    html: (data) => `
+    html: (_data) => `
       <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
         <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
           <h1 style="color: #e74c3c;">Payment Cancelled</h1>

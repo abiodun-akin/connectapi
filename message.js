@@ -1,6 +1,44 @@
 const mongoose = require("mongoose");
 const { analyzeMessage } = require("./utils/messageAnalyzer");
 
+const ALLOWED_ATTACHMENT_MIME_TYPES = Object.freeze([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+]);
+
+const MAX_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024;
+
+const normalizeAttachment = (attachment) => {
+  if (!attachment) return null;
+
+  const url = String(attachment.url || "").trim();
+  const name = String(attachment.name || "").trim();
+  const mimeType = String(attachment.mimeType || "").trim().toLowerCase();
+  const size = Number(attachment.size || 0);
+
+  if (!url || !name || !mimeType || !Number.isFinite(size) || size <= 0) {
+    throw new Error("Invalid attachment payload");
+  }
+
+  if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(mimeType)) {
+    throw new Error("Unsupported attachment type");
+  }
+
+  if (size > MAX_ATTACHMENT_SIZE_BYTES) {
+    throw new Error("Attachment exceeds size limit");
+  }
+
+  return {
+    url,
+    name,
+    mimeType,
+    size,
+  };
+};
+
 const messageSchema = new mongoose.Schema(
   {
     sender_id: {
@@ -22,7 +60,13 @@ const messageSchema = new mongoose.Schema(
     },
     content: {
       type: String,
-      required: true,
+      default: "",
+    },
+    attachment: {
+      url: String,
+      name: String,
+      mimeType: String,
+      size: Number,
     },
     status: {
       type: String,
@@ -55,8 +99,12 @@ messageSchema.index({ "aiAnalysisResult.isSuspicious": 1 });
 
 // Pre-save hook: Analyze message content
 messageSchema.pre("save", function (next) {
+  if (!this.content && !this.attachment) {
+    return next(new Error("Message must include content or attachment"));
+  }
+
   if (!this.aiAnalysisResult) {
-    const analysis = analyzeMessage(this.content);
+    const analysis = analyzeMessage(this.content || "");
     this.aiAnalysisResult = analysis;
 
     // Auto-flag if suspicious
@@ -70,13 +118,16 @@ messageSchema.pre("save", function (next) {
 
 // Static methods
 messageSchema.statics.sendMessage = async function (messageData) {
-  const { sender_id, recipient_id, match_id, content } = messageData;
+  const { sender_id, recipient_id, match_id, content, attachment } = messageData;
+  const normalizedContent = String(content || "").trim();
+  const normalizedAttachment = normalizeAttachment(attachment);
   
   return this.create({
     sender_id,
     recipient_id,
     match_id,
-    content,
+    content: normalizedContent,
+    attachment: normalizedAttachment,
   });
 };
 
@@ -84,7 +135,7 @@ messageSchema.statics.getConversation = async function (match_id, limit = 50, sk
   return this.find({
     match_id,
   })
-    .select("sender_id recipient_id content status createdAt")
+    .select("sender_id recipient_id content attachment status createdAt")
     .sort({ createdAt: -1 })
     .limit(limit)
     .skip(skip)
