@@ -1,65 +1,50 @@
 /**
- * Message Analysis Utility
+ * Message Analysis Utility - ENHANCED (Path B)
  * Primary: Google Gemini API for intelligent analysis
- * Fallback: Pattern matching and heuristics
+ * Secondary: Enhanced pattern matching with context awareness
+ * Tertiary: Original pattern matching (fallback)
+ *
+ * Improvements in v2:
+ * - Context-aware pattern detection
+ * - Weighted pattern scoring 
+ * - Confidence scoring
+ * - False positive reduction
  */
 
 const geminiAnalyzer = require("./geminiAnalyzer");
-
-const suspiciousPatterns = {
-  // Payment/fraud related
-  payment: [
-    /wire\s+(money|transfer|funds)/gi,
-    /bank\s+account\s+(number|details)/gi,
-    /credit\s+card/gi,
-    /western\s+union/gi,
-    /money\s+gram/gi,
-    /paypal/gi,
-    /cryptocurrency|bitcoin|ethereum|crypto/gi,
-    /advance\s+(fee|payment|money)/gi,
-  ],
-  
-  // Romantic scam patterns
-  romance: [
-    /i\s+love\s+you/gi,
-    /marry|marriage/gi,
-    /boyfriend|girlfriend/gi,
-    /divorce|separated/gi,
-    /need.*money.*for.*ticket/gi,
-    /send.*money.*emergency/gi,
-  ],
-  
-  // Phishing/account compromise
-  phishing: [
-    /password|PIN|account\s+number/gi,
-    /verify.*account/gi,
-    /confirm.*identity/gi,
-    /update.*payment/gi,
-    /click.*link/gi,
-    /download.*file/gi,
-  ],
-  
-  // Spam/irrelevant content
-  spam: [
-    /viagra|cialis|medication/gi,
-    /lottery|prize|winner/gi,
-    /click\s+here/gi,
-    /make\s+money\s+fast/gi,
-    /easy\s+money/gi,
-  ],
-};
-
-const warningKeywords = {
-  urgency: [/urgent|asap|immediately|quickly/gi],
-  pressure: [/must|have\s+to|cannot|don't|penalty|will.*action/gi],
-  secrecy: [/secret|don't\s+tell|keep.*quiet|between\s+us/gi],
-};
+const enhancedAnalyzer = require("./messageAnalyzerEnhanced");
 
 /**
- * Pattern-based analysis (fallback)
- * Analyzes messages for suspicious patterns
+ * Pattern-based analysis
+ * v1 (default): Simple pattern matching
+ * v2 (enhanced): Context-aware with weighted patterns - reduces false positives
  */
-function analyzeMessagePatterns(content) {
+function analyzeMessagePatterns(content, useEnhanced = false) {
+  if (useEnhanced) {
+    // Path B: Enhanced analyzer with context awareness
+    const enhanced = enhancedAnalyzer.analyzeMessagePatternsEnhanced(content);
+    return {
+      isSuspicious: enhanced.isSuspicious,
+      riskScore: enhanced.riskScore,
+      reason: enhanced.reason,
+      flaggedPatterns: enhanced.flaggedPatterns,
+      detectedKeywords: enhanced.detectedKeywords,
+      contextualNotes: enhanced.contextualNotes,
+      confidence: enhanced.confidence,
+      hasFarmContext: enhanced.hasFarmContext,
+      timestamp: enhanced.timestamp,
+    };
+  } else {
+    // Original simpler pattern matching (for backwards compatibility)
+    return analyzeMessagePatternsOriginal(content);
+  }
+}
+
+/**
+ * Original pattern-based analysis (v1)
+ * Kept for backwards compatibility with existing tests
+ */
+function analyzeMessagePatternsOriginal(content) {
   if (!content || typeof content !== "string") {
     return {
       isSuspicious: false,
@@ -70,10 +55,51 @@ function analyzeMessagePatterns(content) {
     };
   }
 
+  const suspiciousPatterns = {
+    payment: [
+      /wire\s+(money|transfer|funds)/gi,
+      /bank\s+account\s+(number|details)/gi,
+      /credit\s+card/gi,
+      /western\s+union/gi,
+      /money\s+gram/gi,
+      /paypal/gi,
+      /cryptocurrency|bitcoin|ethereum|crypto/gi,
+      /advance\s+(fee|payment|money)/gi,
+    ],
+    romance: [
+      /i\s+love\s+you/gi,
+      /marry|marriage/gi,
+      /boyfriend|girlfriend/gi,
+      /divorce|separated/gi,
+      /need.*money.*for.*ticket/gi,
+      /send.*money.*emergency/gi,
+    ],
+    phishing: [
+      /password|PIN|account\s+number/gi,
+      /verify.*account/gi,
+      /confirm.*identity/gi,
+      /update.*payment/gi,
+      /click.*link/gi,
+      /download.*file/gi,
+    ],
+    spam: [
+      /viagra|cialis|medication/gi,
+      /lottery|prize|winner/gi,
+      /click\s+here/gi,
+      /make\s+money\s+fast/gi,
+      /easy\s+money/gi,
+    ],
+  };
+
+  const warningKeywords = {
+    urgency: [/urgent|asap|immediately|quickly/gi],
+    pressure: [/must|have\s+to|cannot|don't|penalty|will.*action/gi],
+    secrecy: [/secret|don't\s+tell|keep.*quiet|between\s+us/gi],
+  };
+
   let riskScore = 0;
   const flaggedPatterns = [];
 
-  // Check for suspicious patterns
   for (const category in suspiciousPatterns) {
     const patterns = suspiciousPatterns[category];
     for (const pattern of patterns) {
@@ -84,22 +110,20 @@ function analyzeMessagePatterns(content) {
           pattern: pattern.source,
         });
       }
-      pattern.lastIndex = 0; // Reset regex state for global patterns
+      pattern.lastIndex = 0;
     }
   }
 
-  // Check for warning keywords
   for (const warningType in warningKeywords) {
     const patterns = warningKeywords[warningType];
     for (const pattern of patterns) {
       if (pattern.test(content)) {
         riskScore += 8;
       }
-      pattern.lastIndex = 0; // Reset regex state for global patterns
+      pattern.lastIndex = 0;
     }
   }
 
-  // Check content characteristics
   const urlCount = (content.match(/https?:\/\/\S+/gi) || []).length;
   if (urlCount > 2) {
     riskScore += 15;
@@ -114,15 +138,11 @@ function analyzeMessagePatterns(content) {
     riskScore += 5;
   }
 
-  // Check message length extremes
   if (content.length > 2000) {
     riskScore += 5;
   }
 
-  // Cap risk score at 100
   riskScore = Math.min(riskScore, 100);
-
-  // Determine if suspicious (score > 30)
   const isSuspicious = riskScore > 30;
 
   let reason = "";
