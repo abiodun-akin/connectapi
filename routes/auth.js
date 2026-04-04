@@ -80,10 +80,20 @@ const getRequestBaseUrl = (req) => {
   return `${protocol}://${req.get("host")}`;
 };
 
-const getFrontendOrigin = () =>
-  (process.env.FRONTEND_ORIGIN || "http://localhost:5173")
-    .trim()
-    .replace(/\/+$/, "");
+const getFrontendOrigin = () => {
+  // Use environment variable if set, otherwise default to localhost:5173
+  let origin = process.env.FRONTEND_ORIGIN;
+  
+  if (!origin) {
+    // In development, use localhost:5173 (Vite dev server)
+    // In production, this should be set explicitly
+    origin = process.env.NODE_ENV === "production" 
+      ? "https://farmconnect-frontend.onrender.com"
+      : "http://localhost:5173";
+  }
+  
+  return origin.trim().replace(/\/+$/, "");
+};
 
 const getFrontendCallbackUrl = (params = {}) => {
   const url = new URL("/auth/social/callback", getFrontendOrigin());
