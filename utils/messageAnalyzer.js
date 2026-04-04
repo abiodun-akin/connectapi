@@ -84,6 +84,7 @@ function analyzeMessagePatterns(content) {
           pattern: pattern.source,
         });
       }
+      pattern.lastIndex = 0; // Reset regex state for global patterns
     }
   }
 
@@ -94,6 +95,7 @@ function analyzeMessagePatterns(content) {
       if (pattern.test(content)) {
         riskScore += 8;
       }
+      pattern.lastIndex = 0; // Reset regex state for global patterns
     }
   }
 
