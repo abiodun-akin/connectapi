@@ -173,6 +173,17 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    // TOTP Authenticator App Support
+    twoFactorSecret: {
+      type: String,
+      default: null,
+      select: false, // Hidden by default
+    },
+    twoFactorMethod: {
+      type: String,
+      enum: ["email", "authenticator", null],
+      default: null,
+    },
     // Last login tracking
     lastLogin: Date,
   },
@@ -311,6 +322,31 @@ userSchema.methods.getRecoveryCodeStatus = function() {
     remaining: total - used,
     generated: this.twoFactorRecoveryCodesGeneratedAt,
   };
+};
+
+// TOTP (Authenticator App) Methods
+userSchema.methods.generateTOTPSecret = function() {
+  const speakeasy = require('speakeasy');
+  const secret = speakeasy.generateSecret({
+    name: `FarmConnect (${this.email})`,
+    issuer: 'FarmConnect',
+    length: 32,
+  });
+  this.twoFactorSecret = secret.base32;
+  return secret;
+};
+
+userSchema.methods.verifyTOTPCode = function(token) {
+  if (!this.twoFactorSecret) {
+    return false;
+  }
+  const speakeasy = require('speakeasy');
+  return speakeasy.totp.verify({
+    secret: this.twoFactorSecret,
+    encoding: 'base32',
+    token,
+    window: 2, // Allow for time drift (±2 time steps)
+  });
 };
 
 userSchema.options.toJSON.transform = (doc, ret) => {

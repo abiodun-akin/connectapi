@@ -665,7 +665,7 @@ router.post("/2fa/verify", async (req, res, next) => {
     }
 
     const user = await User.findById(decoded.id).select(
-      "+twoFactorCodeHash +twoFactorCodeExpiresAt +twoFactorAttemptCount +twoFactorRecoveryCodes",
+      "+twoFactorCodeHash +twoFactorCodeExpiresAt +twoFactorAttemptCount +twoFactorRecoveryCodes +twoFactorSecret",
     );
 
     if (!user || !user.twoFactorEnabled) {
@@ -684,36 +684,47 @@ router.post("/2fa/verify", async (req, res, next) => {
         throw new AuthenticationError("Invalid or already-used recovery code");
       }
     } else if (/^\d{6}$/.test(String(code))) {
-      // Validate TOTP code
-      if (!user.twoFactorCodeHash || !user.twoFactorCodeExpiresAt) {
-        throw new AuthorizationError("No active two-factor challenge");
+      // Could be email-based code or TOTP code
+      const codeStr = String(code).trim();
+      let isValid = false;
+
+      // Try TOTP verification first if secret exists
+      if (user.twoFactorSecret) {
+        if (user.verifyTOTPCode(codeStr)) {
+          isValid = true;
+        }
       }
 
-      if (new Date(user.twoFactorCodeExpiresAt) <= new Date()) {
-        user.twoFactorCodeHash = null;
-        user.twoFactorCodeExpiresAt = null;
-        user.twoFactorAttemptCount = 0;
-        await user.save();
-        throw new AuthorizationError("Two-factor code has expired");
+      // Fall back to email code verification if TOTP failed or not set up
+      if (!isValid && user.twoFactorCodeHash && user.twoFactorCodeExpiresAt) {
+        if (new Date(user.twoFactorCodeExpiresAt) > new Date() && hashToken(codeStr) === user.twoFactorCodeHash) {
+          isValid = true;
+        } else if (new Date(user.twoFactorCodeExpiresAt) <= new Date()) {
+          user.twoFactorCodeHash = null;
+          user.twoFactorCodeExpiresAt = null;
+          user.twoFactorAttemptCount = 0;
+          await user.save();
+          throw new AuthorizationError("Two-factor code has expired");
+        } else {
+          // Invalid email code attempt
+          if ((user.twoFactorAttemptCount || 0) >= TWO_FACTOR_MAX_ATTEMPTS) {
+            user.twoFactorCodeHash = null;
+            user.twoFactorCodeExpiresAt = null;
+            user.twoFactorAttemptCount = 0;
+            await user.save();
+            throw new AuthorizationError("Too many invalid attempts. Please login again.");
+          }
+          user.twoFactorAttemptCount = (user.twoFactorAttemptCount || 0) + 1;
+          await user.save();
+          throw new AuthenticationError("Invalid two-factor code");
+        }
       }
 
-      if ((user.twoFactorAttemptCount || 0) >= TWO_FACTOR_MAX_ATTEMPTS) {
-        user.twoFactorCodeHash = null;
-        user.twoFactorCodeExpiresAt = null;
-        user.twoFactorAttemptCount = 0;
-        await user.save();
-        throw new AuthorizationError(
-          "Too many invalid attempts. Please login again.",
-        );
-      }
-
-      if (hashToken(code) !== user.twoFactorCodeHash) {
-        user.twoFactorAttemptCount = (user.twoFactorAttemptCount || 0) + 1;
-        await user.save();
+      if (!isValid) {
         throw new AuthenticationError("Invalid two-factor code");
       }
     } else {
-      throw new ValidationError("A valid 6-digit TOTP code or recovery code is required", "code");
+      throw new ValidationError("A valid 6-digit code or recovery code is required", "code");
     }
 
     user.twoFactorCodeHash = null;
@@ -824,6 +835,110 @@ router.post("/2fa/recovery-codes/regenerate", async (req, res, next) => {
     res.json({
       recoveryCodes: plainCodes,
       message: "New recovery codes generated. Store them in a safe place.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /2fa/setup
+ * Generate TOTP secret and QR code for authenticator app setup
+ */
+router.post("/2fa/setup", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    const { method } = req.body || {};
+
+    // Generate TOTP secret
+    const secret = user.generateTOTPSecret();
+    await user.save();
+
+    const { getTOTPSetupResponse } = require("../utils/totpUtils");
+    const setupResponse = await getTOTPSetupResponse(secret, user.email);
+
+    res.json({
+      message: "TOTP setup initiated",
+      method: method || "authenticator",
+      qrCode: setupResponse.qrCode,
+      secret: setupResponse.secret,
+      manualEntryKey: setupResponse.manualEntryKey,
+      instructions: "Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)",
+      backupSecret: "If you can't scan the QR code, enter this key manually in your app",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /2fa/setup/verify
+ * Verify TOTP setup by confirming user can generate correct code
+ */
+router.post("/2fa/setup/verify", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    const { totpCode } = req.body || {};
+
+    if (!totpCode || !/^\d{6}$/.test(String(totpCode))) {
+      throw new ValidationError("Valid 6-digit TOTP code is required", "totpCode");
+    }
+
+    if (!user.twoFactorSecret) {
+      throw new ValidationError("TOTP setup has not been initiated", "twoFactor");
+    }
+
+    // Verify TOTP code
+    if (!user.verifyTOTPCode(String(totpCode))) {
+      throw new AuthenticationError("Invalid TOTP code. Please try again.");
+    }
+
+    // Setup successful - generate recovery codes
+    user.twoFactorEnabled = true;
+    user.twoFactorMethod = "authenticator";
+    const plainCodes = User.generateRecoveryCodes();
+    user.setRecoveryCodes(plainCodes);
+    await user.save();
+
+    res.json({
+      message: "Two-factor authentication enabled successfully",
+      recoveryCodes: plainCodes,
+      method: "authenticator",
+      status: "Store these recovery codes in a safe place. You'll need them if you lose access to your authenticator app.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /2fa/method
+ * Switch between email and authenticator as primary 2FA method
+ */
+router.put("/2fa/method", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    const { method } = req.body || {};
+
+    if (!["email", "authenticator"].includes(method)) {
+      throw new ValidationError("Method must be 'email' or 'authenticator'", "method");
+    }
+
+    if (!user.twoFactorEnabled) {
+      throw new ValidationError("Two-factor authentication is not enabled", "twoFactor");
+    }
+
+    if (method === "authenticator" && !user.twoFactorSecret) {
+      throw new ValidationError("Authenticator app is not set up yet", "method");
+    }
+
+    user.twoFactorMethod = method;
+    await user.save();
+
+    res.json({
+      message: `Two-factor method changed to ${method}`,
+      method,
+      twoFactorEnabled: true,
     });
   } catch (error) {
     next(error);
