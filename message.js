@@ -97,7 +97,7 @@ messageSchema.index({ match_id: 1, createdAt: -1 });
 messageSchema.index({ status: 1, createdAt: -1 });
 messageSchema.index({ "aiAnalysisResult.isSuspicious": 1 });
 
-// Pre-save hook: Analyze message content
+// Pre-save hook: Analyze message content with adaptive learning
 messageSchema.pre("save", async function (next) {
   if (!this.content && !this.attachment) {
     return next(new Error("Message must include content or attachment"));
@@ -105,8 +105,39 @@ messageSchema.pre("save", async function (next) {
 
   if (!this.aiAnalysisResult) {
     try {
-      const analysis = await analyzeMessage(this.content || "");
-      this.aiAnalysisResult = analysis;
+      const adaptiveLearningService = require("./services/adaptiveLearningService");
+      const User = require("./user");
+
+      // Get user for community context
+      const sender = await User.findById(this.sender_id);
+      const communityId = sender?.communityId || "default";
+
+      // Path C: Fetch adaptive configuration with learned weights
+      let adaptiveConfig = {};
+      try {
+        adaptiveConfig = await adaptiveLearningService.getAdaptiveConfiguration(
+          this.sender_id,
+          communityId
+        );
+      } catch (configError) {
+        console.warn("[Adaptive Learning] Config fetch failed, using defaults:", configError.message);
+        // Continues with defaults if learning service unavailable
+      }
+
+      // Analyze with adaptive weights if available
+      const analysis = await analyzeMessage(
+        this.content || "",
+        {
+          patternWeights: adaptiveConfig.patternWeights,
+          riskThreshold: adaptiveConfig.customRiskThreshold,
+          contextFactors: adaptiveConfig.contextFactors,
+        }
+      );
+
+      this.aiAnalysisResult = {
+        ...analysis,
+        adaptiveConfig: !!adaptiveConfig.customRiskThreshold, // Flag if adaptive weights used
+      };
 
       // Auto-flag if suspicious
       if (analysis.isSuspicious) {
@@ -116,7 +147,7 @@ messageSchema.pre("save", async function (next) {
       next();
     } catch (error) {
       console.error("[Message Analysis] Error:", error.message);
-      // Continue with patterns-only fallback
+      // Continue with patterns-only fallback (keep existing behavior)
       const { analyzeMessagePatterns } = require("./utils/messageAnalyzer");
       const analysis = analyzeMessagePatterns(this.content || "");
       this.aiAnalysisResult = analysis;
