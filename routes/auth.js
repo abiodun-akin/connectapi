@@ -842,6 +842,45 @@ router.post("/2fa/recovery-codes/regenerate", async (req, res, next) => {
 });
 
 /**
+ * POST /2fa/recovery-codes/send-email
+ * Send recovery codes to user's email for backup
+ */
+router.post("/2fa/recovery-codes/send-email", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    
+    if (!user.twoFactorEnabled) {
+      throw new ValidationError(
+        "Two-factor authentication is not enabled",
+        "twoFactor"
+      );
+    }
+
+    const status = user.getRecoveryCodeStatus();
+    if (!status || status.total === 0) {
+      throw new ValidationError(
+        "No recovery codes available to send",
+        "recoveryCodes"
+      );
+    }
+
+    // Publish event for async email sending
+    publishEvent("auth_events", "recovery_codes_email_requested", {
+      userId: user._id.toString(),
+      email: user.email,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "Recovery codes email has been queued for sending",
+      email: user.email,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /2fa/setup
  * Generate TOTP secret and QR code for authenticator app setup
  */
