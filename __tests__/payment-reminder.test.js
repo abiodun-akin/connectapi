@@ -1,5 +1,6 @@
 jest.mock("../subscription", () => ({
   find: jest.fn(),
+  applyScheduledDowngrade: jest.fn(),
 }));
 
 jest.mock("../user", () => ({
@@ -25,7 +26,10 @@ jest.mock("../utils/paystackUtils", () => ({
 const Subscription = require("../subscription");
 const User = require("../user");
 const { publishEvent } = require("../middleware/eventNotification");
-const { processPaymentReminders } = require("../workers/trialWorker");
+const {
+  processPaymentReminders,
+  processScheduledDowngrades,
+} = require("../workers/trialWorker");
 
 const makeSubscription = (overrides = {}) => {
   const renewalDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // 2 days from now
@@ -97,9 +101,11 @@ describe("processPaymentReminders", () => {
         amount: 5000,
         renewalDate: subscription.renewalDate,
         daysUntilRenewal: expect.any(Number),
-      })
+      }),
     );
-    expect(subscription.paymentReminderLastRenewalDate).toEqual(subscription.renewalDate);
+    expect(subscription.paymentReminderLastRenewalDate).toEqual(
+      subscription.renewalDate,
+    );
     expect(subscription.paymentReminderSentAt).toBeInstanceOf(Date);
     expect(subscription.save).toHaveBeenCalledTimes(1);
   });
@@ -148,7 +154,10 @@ describe("processPaymentReminders", () => {
     });
 
     Subscription.find.mockResolvedValue([alreadyReminded, needsReminder]);
-    User.findById.mockResolvedValue({ _id: "user-001", email: "farmer@example.com" });
+    User.findById.mockResolvedValue({
+      _id: "user-001",
+      email: "farmer@example.com",
+    });
 
     const count = await processPaymentReminders();
 
@@ -157,7 +166,7 @@ describe("processPaymentReminders", () => {
     expect(publishEvent).toHaveBeenCalledWith(
       "payment_events",
       "payment.reminder",
-      expect.objectContaining({ subscriptionId: "sub-needs" })
+      expect.objectContaining({ subscriptionId: "sub-needs" }),
     );
     expect(alreadyReminded.save).not.toHaveBeenCalled();
     expect(needsReminder.save).toHaveBeenCalledTimes(1);
@@ -167,6 +176,69 @@ describe("processPaymentReminders", () => {
     Subscription.find.mockRejectedValue(new Error("DB connection failed"));
 
     const count = await processPaymentReminders();
+
+    expect(count).toBe(0);
+  });
+});
+
+describe("processScheduledDowngrades", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("returns 0 when there are no scheduled downgrades due", async () => {
+    Subscription.find.mockResolvedValue([]);
+
+    const count = await processScheduledDowngrades();
+
+    expect(count).toBe(0);
+    expect(Subscription.applyScheduledDowngrade).not.toHaveBeenCalled();
+    expect(publishEvent).not.toHaveBeenCalled();
+  });
+
+  it("applies scheduled downgrade and publishes event", async () => {
+    const dueSub = {
+      _id: "sub-due-1",
+      user_id: "user-001",
+      pendingDowngrade: {
+        status: "scheduled",
+        effectiveAt: new Date(Date.now() - 60 * 1000),
+      },
+    };
+    Subscription.find.mockResolvedValue([dueSub]);
+    Subscription.applyScheduledDowngrade.mockResolvedValue({
+      _id: "sub-due-1",
+      user_id: "user-001",
+      status: "expired",
+      plan: "premium",
+    });
+    User.findById.mockResolvedValue({
+      _id: "user-001",
+      email: "user@example.com",
+    });
+
+    const count = await processScheduledDowngrades();
+
+    expect(count).toBe(1);
+    expect(Subscription.applyScheduledDowngrade).toHaveBeenCalledWith(
+      "sub-due-1",
+    );
+    expect(publishEvent).toHaveBeenCalledWith(
+      "payment_events",
+      "payment.downgrade.applied",
+      expect.objectContaining({
+        userId: "user-001",
+        email: "user@example.com",
+        subscriptionId: "sub-due-1",
+        status: "expired",
+      }),
+    );
+  });
+
+  it("returns 0 gracefully when query fails", async () => {
+    Subscription.find.mockRejectedValue(new Error("query failed"));
+
+    const count = await processScheduledDowngrades();
 
     expect(count).toBe(0);
   });

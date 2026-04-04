@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 const PaymentRecord = require("../paymentRecord");
 const Subscription = require("../subscription");
-const { verifyPaystackPayment, getPaystackSecretKey } = require("../utils/paystackUtils");
+const {
+  verifyPaystackPayment,
+  getPaystackSecretKey,
+} = require("../utils/paystackUtils");
 const { NotFoundError, ValidationError } = require("../errors/AppError");
 const axios = require("axios");
 const { publishEvent } = require("../middleware/eventNotification");
@@ -31,12 +34,12 @@ router.use(verifyAdmin);
  * List all payments with filters and sorting
  */
 router.get("/payments", async (req, res, next) => {
-  const { 
-    status = "all", 
-    limit = 20, 
-    page = 1, 
+  const {
+    status = "all",
+    limit = 20,
+    page = 1,
     sortBy = "createdAt",
-    search 
+    search,
   } = req.query;
 
   try {
@@ -65,7 +68,7 @@ router.get("/payments", async (req, res, next) => {
     const total = await PaymentRecord.countDocuments(query);
 
     res.json({
-      payments: payments.map(p => ({
+      payments: payments.map((p) => ({
         _id: p._id,
         reference: p.reference,
         email: p.email,
@@ -145,7 +148,7 @@ router.post("/payments/:paymentId/verify", async (req, res, next) => {
           payment.reference,
           "verified",
           paystackData,
-          paystackData
+          paystackData,
         );
 
         publishEvent("payment_events", "admin.payment.reverified", {
@@ -165,7 +168,7 @@ router.post("/payments/:paymentId/verify", async (req, res, next) => {
     } catch (paystackError) {
       await PaymentRecord.recordVerificationError(
         payment.reference,
-        paystackError
+        paystackError,
       );
 
       return res.status(400).json({
@@ -234,7 +237,7 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
           headers: {
             Authorization: `Bearer ${secretKey}`,
           },
-        }
+        },
       );
 
       if (!refundResponse.data.status) {
@@ -244,16 +247,13 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
       const refundData = refundResponse.data.data;
 
       // Update payment record
-      await PaymentRecord.completeRefund(
-        payment._id,
-        refundData.reference
-      );
+      await PaymentRecord.completeRefund(payment._id, refundData.reference);
 
       // If there's a subscription, mark as cancelled
       if (payment.subscription_id) {
         await Subscription.cancelSubscription(
           payment.subscription_id,
-          `Refund processed: ${reason}`
+          `Refund processed: ${reason}`,
         );
       }
 
@@ -278,7 +278,8 @@ router.post("/payments/:paymentId/refund", async (req, res, next) => {
       console.error("Paystack refund error:", paystackError.message);
       return res.status(400).json({
         error: "Refund failed",
-        paystackError: paystackError.response?.data?.message || paystackError.message,
+        paystackError:
+          paystackError.response?.data?.message || paystackError.message,
         code: "REFUND_FAILED",
       });
     }
@@ -306,7 +307,7 @@ router.post("/payments/:paymentId/dispute", async (req, res, next) => {
         disputeReason: reason,
         disputeEvidence: evidence,
       },
-      { new: true }
+      { new: true },
     );
 
     if (!payment) {
@@ -341,7 +342,7 @@ router.post("/payments/:paymentId/dispute", async (req, res, next) => {
 router.get("/stats/overview", async (req, res, next) => {
   try {
     const stats = await PaymentRecord.getPaymentStats();
-    
+
     const totalRevenue = await PaymentRecord.aggregate([
       { $match: { status: "success" } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -379,9 +380,10 @@ router.get("/stats/overview", async (req, res, next) => {
       overview: {
         totalPayments,
         successfulPayments,
-        successRate: totalPayments > 0 
-          ? ((successfulPayments / totalPayments) * 100).toFixed(2) 
-          : 0,
+        successRate:
+          totalPayments > 0
+            ? ((successfulPayments / totalPayments) * 100).toFixed(2)
+            : 0,
         pendingPayments,
         failedPayments,
         totalRevenue: totalRevenue[0]?.total || 0,
@@ -453,7 +455,7 @@ router.get("/pending", async (req, res, next) => {
 
   try {
     const skip = (page - 1) * limit;
-    
+
     const payments = await PaymentRecord.find({ status: "pending" })
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
@@ -464,7 +466,7 @@ router.get("/pending", async (req, res, next) => {
     const total = await PaymentRecord.countDocuments({ status: "pending" });
 
     res.json({
-      payments: payments.map(p => ({
+      payments: payments.map((p) => ({
         _id: p._id,
         reference: p.reference,
         email: p.email,
@@ -472,7 +474,9 @@ router.get("/pending", async (req, res, next) => {
         plan: p.plan,
         amount: p.amount,
         createdAt: p.createdAt,
-        hoursOld: Math.floor((Date.now() - new Date(p.createdAt)) / (1000 * 60 * 60)),
+        hoursOld: Math.floor(
+          (Date.now() - new Date(p.createdAt)) / (1000 * 60 * 60),
+        ),
       })),
       pagination: {
         total,
@@ -480,6 +484,86 @@ router.get("/pending", async (req, res, next) => {
         limit: parseInt(limit),
         pages: Math.ceil(total / limit),
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/subscriptions/:userId/downgrade
+ * Admin-triggered downgrade to free access.
+ * - immediate=true: apply now
+ * - immediate=false: apply at current subscription endDate
+ */
+router.post("/subscriptions/:userId/downgrade", async (req, res, next) => {
+  const { immediate = true, reason = "Admin manual downgrade" } =
+    req.body || {};
+
+  try {
+    const userId = req.params.userId;
+    const activeSubscription =
+      await Subscription.getUserActiveSubscription(userId);
+
+    if (!activeSubscription) {
+      return next(new NotFoundError("Active subscription"));
+    }
+
+    if (
+      !immediate &&
+      activeSubscription.pendingDowngrade?.status === "scheduled"
+    ) {
+      throw new ValidationError(
+        "A downgrade is already scheduled for this subscription",
+        "subscription",
+      );
+    }
+
+    const effectiveAt = immediate ? new Date() : activeSubscription.endDate;
+    const scheduled = await Subscription.scheduleDowngrade(
+      userId,
+      null,
+      effectiveAt,
+    );
+
+    if (!scheduled) {
+      return next(new NotFoundError("Active subscription"));
+    }
+
+    let resultSubscription = scheduled;
+    if (immediate) {
+      const applied = await Subscription.applyScheduledDowngrade(scheduled._id);
+      if (!applied) {
+        throw new ValidationError(
+          "Unable to apply downgrade immediately",
+          "subscription",
+        );
+      }
+      resultSubscription = applied;
+    }
+
+    publishEvent("payment_events", "admin.subscription.downgraded", {
+      adminId: req.user._id,
+      userId,
+      subscriptionId: resultSubscription._id,
+      immediate: Boolean(immediate),
+      reason,
+      effectiveAt,
+      status: resultSubscription.status,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: immediate
+        ? "Subscription downgraded to free access immediately"
+        : "Subscription downgrade to free access scheduled",
+      subscription: {
+        _id: resultSubscription._id,
+        status: resultSubscription.status,
+        plan: resultSubscription.plan,
+        pendingDowngrade: resultSubscription.pendingDowngrade,
+      },
+      effectiveAt,
     });
   } catch (error) {
     next(error);

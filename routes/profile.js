@@ -14,11 +14,14 @@ router.post("/initialize", async (req, res, next) => {
 
   try {
     if (!["farmer", "vendor"].includes(profileType)) {
-      throw new ValidationError("Profile type must be farmer or vendor", "profileType");
+      throw new ValidationError(
+        "Profile type must be farmer or vendor",
+        "profileType",
+      );
     }
 
     const existingProfile = await UserProfile.getUserProfile(req.user._id);
-    
+
     // If profile is already complete, don't allow re-initialization
     if (existingProfile && existingProfile.isProfileComplete) {
       return res.status(400).json({
@@ -28,13 +31,13 @@ router.post("/initialize", async (req, res, next) => {
     }
 
     let profile;
-    
+
     // If profile exists but incomplete, update it
     if (existingProfile) {
       profile = await UserProfile.findOneAndUpdate(
         { user_id: req.user._id },
         { profileType },
-        { new: true }
+        { new: true },
       );
     } else {
       // Create new profile
@@ -62,7 +65,10 @@ router.post("/farmer", async (req, res, next) => {
 
   try {
     if (!farmerData.country || !AFRICAN_COUNTRY_SET.has(farmerData.country)) {
-      throw new ValidationError("Please select a valid African country", "country");
+      throw new ValidationError(
+        "Please select a valid African country",
+        "country",
+      );
     }
 
     // Validate top-level required fields
@@ -88,8 +94,11 @@ router.post("/farmer", async (req, res, next) => {
     ];
 
     for (const field of requiredNestedFields) {
-      if (!farmerData.farmerDetails?.[field] || 
-          (Array.isArray(farmerData.farmerDetails[field]) && farmerData.farmerDetails[field].length === 0)) {
+      if (
+        !farmerData.farmerDetails?.[field] ||
+        (Array.isArray(farmerData.farmerDetails[field]) &&
+          farmerData.farmerDetails[field].length === 0)
+      ) {
         throw new ValidationError(`${field} is required`, field);
       }
     }
@@ -103,6 +112,7 @@ router.post("/farmer", async (req, res, next) => {
       latitude: farmerData.latitude,
       longitude: farmerData.longitude,
       bio: farmerData.bio,
+      profileImageUrl: farmerData.profileImageUrl,
       farmerDetails: farmerData.farmerDetails,
     });
 
@@ -124,7 +134,10 @@ router.post("/vendor", async (req, res, next) => {
 
   try {
     if (!vendorData.country || !AFRICAN_COUNTRY_SET.has(vendorData.country)) {
-      throw new ValidationError("Please select a valid African country", "country");
+      throw new ValidationError(
+        "Please select a valid African country",
+        "country",
+      );
     }
 
     // Validate top-level required fields
@@ -150,8 +163,11 @@ router.post("/vendor", async (req, res, next) => {
     ];
 
     for (const field of requiredNestedFields) {
-      if (!vendorData.vendorDetails?.[field] ||
-          (Array.isArray(vendorData.vendorDetails[field]) && vendorData.vendorDetails[field].length === 0)) {
+      if (
+        !vendorData.vendorDetails?.[field] ||
+        (Array.isArray(vendorData.vendorDetails[field]) &&
+          vendorData.vendorDetails[field].length === 0)
+      ) {
         throw new ValidationError(`${field} is required`, field);
       }
     }
@@ -165,6 +181,7 @@ router.post("/vendor", async (req, res, next) => {
       latitude: vendorData.latitude,
       longitude: vendorData.longitude,
       bio: vendorData.bio,
+      profileImageUrl: vendorData.profileImageUrl,
       vendorDetails: vendorData.vendorDetails,
     });
 
@@ -229,6 +246,7 @@ router.get("/:userId", async (req, res, next) => {
       location: profile.location,
       state: profile.state,
       bio: profile.bio,
+      profileImageUrl: profile.profileImageUrl,
       createdAt: profile.createdAt,
       ...(profile.profileType === "farmer" && {
         farmingAreas: profile.farmerDetails?.farmingAreas,
@@ -256,7 +274,7 @@ router.put("/", async (req, res, next) => {
     const profile = await UserProfile.findOneAndUpdate(
       { user_id: req.user._id },
       req.body,
-      { new: true }
+      { new: true },
     );
 
     if (!profile) {

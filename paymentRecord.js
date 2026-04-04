@@ -33,13 +33,20 @@ const paymentRecordSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "success", "failed", "verified", "refunded", "disputed"],
+      enum: [
+        "pending",
+        "success",
+        "failed",
+        "verified",
+        "refunded",
+        "disputed",
+      ],
       default: "pending",
       index: true,
     },
     type: {
       type: String,
-      enum: ["payment", "trial_auth"],
+      enum: ["payment", "trial_auth", "invoice"],
       default: "payment",
     },
     paymentMethod: {
@@ -78,10 +85,12 @@ const paymentRecordSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    verificationErrors: [{
-      timestamp: Date,
-      error: String,
-    }],
+    verificationErrors: [
+      {
+        timestamp: Date,
+        error: String,
+      },
+    ],
     // Refund tracking
     refundStatus: {
       type: String,
@@ -133,16 +142,16 @@ const paymentRecordSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Static methods
 paymentRecordSchema.statics.createPaymentRecord = async function (paymentData) {
-  const { 
-    user_id, 
-    reference, 
-    plan, 
-    amount, 
+  const {
+    user_id,
+    reference,
+    plan,
+    amount,
     email,
     paystackTransactionId,
     authorizationUrl,
@@ -170,7 +179,7 @@ paymentRecordSchema.statics.updatePaymentStatus = async function (
   reference,
   status,
   paystackResponse = null,
-  verificationData = {}
+  verificationData = {},
 ) {
   const updateData = {
     status,
@@ -182,15 +191,17 @@ paymentRecordSchema.statics.updatePaymentStatus = async function (
   };
 
   // Remove undefined fields
-  Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key]);
+  Object.keys(updateData).forEach(
+    (key) => updateData[key] === undefined && delete updateData[key],
+  );
 
   return this.findOneAndUpdate(
     { reference },
     {
       $set: updateData,
-      $inc: { verificationAttempts: 1 }
+      $inc: { verificationAttempts: 1 },
     },
-    { new: true }
+    { new: true },
   );
 };
 
@@ -200,7 +211,7 @@ paymentRecordSchema.statics.getPaymentByReference = async function (reference) {
 
 paymentRecordSchema.statics.initiateRefund = async function (
   paymentId,
-  refundReason
+  refundReason,
 ) {
   return this.findByIdAndUpdate(
     paymentId,
@@ -209,13 +220,13 @@ paymentRecordSchema.statics.initiateRefund = async function (
       refundReason,
       refundInitiatedAt: new Date(),
     },
-    { new: true }
+    { new: true },
   );
 };
 
 paymentRecordSchema.statics.completeRefund = async function (
   paymentId,
-  refundReference
+  refundReference,
 ) {
   return this.findByIdAndUpdate(
     paymentId,
@@ -224,13 +235,13 @@ paymentRecordSchema.statics.completeRefund = async function (
       refundReference,
       refundCompletedAt: new Date(),
     },
-    { new: true }
+    { new: true },
   );
 };
 
 paymentRecordSchema.statics.recordVerificationError = async function (
   reference,
-  error
+  error,
 ) {
   return this.findOneAndUpdate(
     { reference },
@@ -239,14 +250,18 @@ paymentRecordSchema.statics.recordVerificationError = async function (
         verificationErrors: {
           timestamp: new Date(),
           error: error.message,
-        }
-      }
+        },
+      },
     },
-    { new: true }
+    { new: true },
   );
 };
 
-paymentRecordSchema.statics.getPaymentsByStatus = async function (status, limit = 20, skip = 0) {
+paymentRecordSchema.statics.getPaymentsByStatus = async function (
+  status,
+  limit = 20,
+  skip = 0,
+) {
   return this.find({ status })
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -254,18 +269,30 @@ paymentRecordSchema.statics.getPaymentsByStatus = async function (status, limit 
     .populate("user_id", "email");
 };
 
-paymentRecordSchema.statics.getPaymentStats = async function() {
+paymentRecordSchema.statics.getInvoicesByUser = async function (
+  userId,
+  limit = 20,
+) {
+  return this.find({
+    user_id: userId,
+    type: "invoice",
+  })
+    .sort({ createdAt: -1 })
+    .limit(limit);
+};
+
+paymentRecordSchema.statics.getPaymentStats = async function () {
   return this.aggregate([
     {
       $group: {
         _id: "$status",
         count: { $sum: 1 },
-        totalAmount: { $sum: "$amount" }
-      }
+        totalAmount: { $sum: "$amount" },
+      },
     },
     {
-      $sort: { _id: 1 }
-    }
+      $sort: { _id: 1 },
+    },
   ]);
 };
 

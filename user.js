@@ -8,10 +8,7 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: [true, "Fullnaame is required"],
-      match: [
-        /^[A-Za-z]+([ '-][A-Za-z]+)*$/,
-        'Please enter a valid full name'
-      ],
+      match: [/^[A-Za-z]+([ '-][A-Za-z]+)*$/, "Please enter a valid full name"],
       trim: true,
       escape: true,
     },
@@ -145,6 +142,37 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    twoFactorCodeHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    twoFactorCodeExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    twoFactorAttemptCount: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+    twoFactorRecoveryCodes: [
+      {
+        codeHash: String, // Hashed recovery code
+        used: { type: Boolean, default: false },
+        usedAt: Date,
+      },
+    ],
+    twoFactorRecoveryCodesGeneratedAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
     // Last login tracking
     lastLogin: Date,
   },
@@ -152,7 +180,7 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
     toJSON: { transform: true },
     toObject: { transform: true },
-  }
+  },
 );
 
 userSchema.statics.signup = async function ({ name, email, password }) {
@@ -178,7 +206,7 @@ userSchema.statics.signup = async function ({ name, email, password }) {
     })
   ) {
     throw new Error(
-      "Password must be at least 8 characters with 1 uppercase letter and 1 number"
+      "Password must be at least 8 characters with 1 uppercase letter and 1 number",
     );
   }
 
@@ -232,8 +260,66 @@ userSchema.methods.createEmailVerificationToken = function () {
   return rawToken;
 };
 
+
+// Static methods for 2FA recovery codes
+userSchema.statics.generateRecoveryCodes = function() {
+  const codes = [];
+  for (let i = 0; i < 10; i++) {
+    // Generate 8-character alphanumeric codes
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    codes.push(code);
+  }
+  return codes;
+};
+
+userSchema.statics.hashRecoveryCode = function(code) {
+  return crypto.createHash('sha256').update(code).digest('hex');
+};
+
+userSchema.methods.setRecoveryCodes = function(plainCodes) {
+  // Hash and store recovery codes
+  this.twoFactorRecoveryCodes = plainCodes.map(code => ({
+    codeHash: crypto.createHash('sha256').update(code).digest('hex'),
+    used: false,
+  }));
+  this.twoFactorRecoveryCodesGeneratedAt = new Date();
+  return this.twoFactorRecoveryCodes.map((_, i) => plainCodes[i]);
+};
+
+userSchema.methods.validateRecoveryCode = function(plainCode) {
+  const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+  const recoveryCode = this.twoFactorRecoveryCodes.find(
+    rc => rc.codeHash === codeHash && !rc.used
+  );
+  
+  if (recoveryCode) {
+    recoveryCode.used = true;
+    recoveryCode.usedAt = new Date();
+    return true;
+  }
+  return false;
+};
+
+userSchema.methods.getRecoveryCodeStatus = function() {
+  if (!this.twoFactorRecoveryCodes) {
+    return { total: 0, remaining: 0 };
+  }
+  const used = this.twoFactorRecoveryCodes.filter(rc => rc.used).length;
+  const total = this.twoFactorRecoveryCodes.length;
+  return {
+    total,
+    remaining: total - used,
+    generated: this.twoFactorRecoveryCodesGeneratedAt,
+  };
+};
+
 userSchema.options.toJSON.transform = (doc, ret) => {
   delete ret.password;
+  delete ret.twoFactorCodeHash;
+  delete ret.twoFactorCodeExpiresAt;
+  delete ret.twoFactorAttemptCount;
+  delete ret.twoFactorRecoveryCodes;
+  delete ret.twoFactorRecoveryCodesGeneratedAt;
   delete ret.__v;
   return ret;
 };

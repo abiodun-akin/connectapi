@@ -76,7 +76,7 @@ router.get("/users", async (req, res, next) => {
           lastLogin: user.lastLogin,
           createdAt: user.createdAt,
         };
-      })
+      }),
     );
 
     res.json({
@@ -267,7 +267,7 @@ router.get("/violations", async (req, res, next) => {
     const collectSuspensions = async () => {
       const suspendedUsers = await User.find({ isSuspended: true })
         .select(
-          "email suspensionReason suspensionDate violationCount flaggedMessageCount"
+          "email suspensionReason suspensionDate violationCount flaggedMessageCount",
         )
         .limit(parseInt(limit))
         .skip(skip);
@@ -295,56 +295,6 @@ router.get("/violations", async (req, res, next) => {
         total = await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
       } else {
         users = users.concat(flaggedResults);
-
-  /**
-   * POST /api/admin/users/:userId/reset-password
-   * Admin directly resets a non-admin user's password
-   */
-  router.post("/users/:userId/reset-password", async (req, res, next) => {
-    const { newPassword } = req.body;
-
-    try {
-      if (!newPassword) {
-        return next(new ValidationError("New password is required", "newPassword"));
-      }
-
-      if (
-        !validator.isStrongPassword(newPassword, {
-          minLength: 8,
-          minLowercase: 1,
-          minUppercase: 1,
-          minNumbers: 1,
-          minSymbols: 0,
-        })
-      ) {
-        return next(
-          new ValidationError(
-            "Password must be at least 8 characters with 1 uppercase letter and 1 number",
-            "newPassword"
-          )
-        );
-      }
-
-      const user = await User.findById(req.params.userId).select("+password isAdmin");
-      if (!user) {
-        return next(new NotFoundError("User"));
-      }
-
-      if (user.isAdmin) {
-        return res.status(403).json({
-          error: "Admin account passwords cannot be reset via this endpoint",
-          code: "FORBIDDEN",
-        });
-      }
-
-      user.password = await bcrypt.hash(newPassword, 12);
-      await user.save();
-
-      res.json({ message: "Password reset successfully" });
-    } catch (error) {
-      next(error);
-    }
-  });
         total += await User.countDocuments({ flaggedMessageCount: { $gt: 0 } });
       }
     }
@@ -373,6 +323,60 @@ router.get("/violations", async (req, res, next) => {
         pages: Math.ceil(total / limit),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/users/:userId/reset-password
+ * Admin directly resets a non-admin user's password
+ */
+router.post("/users/:userId/reset-password", async (req, res, next) => {
+  const { newPassword } = req.body;
+
+  try {
+    if (!newPassword) {
+      return next(
+        new ValidationError("New password is required", "newPassword"),
+      );
+    }
+
+    if (
+      !validator.isStrongPassword(newPassword, {
+        minLength: 8,
+        minLowercase: 1,
+        minUppercase: 1,
+        minNumbers: 1,
+        minSymbols: 0,
+      })
+    ) {
+      return next(
+        new ValidationError(
+          "Password must be at least 8 characters with 1 uppercase letter and 1 number",
+          "newPassword",
+        ),
+      );
+    }
+
+    const user = await User.findById(req.params.userId).select(
+      "+password isAdmin",
+    );
+    if (!user) {
+      return next(new NotFoundError("User"));
+    }
+
+    if (user.isAdmin) {
+      return res.status(403).json({
+        error: "Admin account passwords cannot be reset via this endpoint",
+        code: "FORBIDDEN",
+      });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 12);
+    await user.save();
+
+    res.json({ message: "Password reset successfully" });
   } catch (error) {
     next(error);
   }
@@ -520,6 +524,223 @@ router.get("/messages/flagged", async (req, res, next) => {
         limit: parseInt(limit),
         pages: Math.ceil(total / limit),
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/messages/:messageId/approve
+ * Approve a flagged message and unflag it
+ */
+router.put("/messages/:messageId/approve", async (req, res, next) => {
+  const { messageId } = req.params;
+  const { reason = "Approved by admin" } = req.body;
+
+  try {
+    const message = await Message.findByIdAndUpdate(
+      messageId,
+      {
+        status: "sent",
+        flagReason: null,
+      },
+      { new: true }
+    );
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    // Update sender's flagged message count
+    const sender = await User.findById(message.sender_id);
+    if (sender && sender.flaggedMessageCount > 0) {
+      sender.flaggedMessageCount -= 1;
+      await sender.save();
+    }
+
+    res.json({
+      message: "Message approved",
+      messageId: message._id,
+      status: message.status,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/admin/messages/:messageId
+ * Delete a flagged message
+ */
+router.delete("/messages/:messageId", async (req, res, next) => {
+  const { messageId } = req.params;
+  const { sendWarning = false, reason = "Message violates policy" } = req.body || {};
+
+  try {
+    const message = await Message.findByIdAndDelete(messageId);
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    // Update sender's flagged message count
+    const sender = await User.findById(message.sender_id);
+    if (sender) {
+      sender.flaggedMessageCount += 1;
+      
+      // If sendWarning, record violation
+      if (sendWarning) {
+        sender.violationCount = (sender.violationCount || 0) + 1;
+        sender.violationHistory = sender.violationHistory || [];
+        sender.violationHistory.push({
+          type: "message_violation",
+          timestamp: new Date(),
+          reason,
+        });
+
+        // Auto-suspend if violation count exceeds threshold
+        if (sender.violationCount >= 5) {
+          await suspendUserAccount(sender._id, "Excessive violations detected");
+        }
+      }
+      await sender.save();
+    }
+
+    res.json({
+      message: "Message deleted",
+      messageId,
+      violationRecorded: sendWarning,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/messages/:messageId/warn-sender
+ * Send warning notification to message sender
+ */
+router.post("/messages/:messageId/warn-sender", async (req, res, next) => {
+  const { messageId } = req.params;
+  const { reason = "Your message violated our community guidelines" } = req.body || {};
+
+  try {
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      throw new NotFoundError("Message not found");
+    }
+
+    const sender = await User.findById(message.sender_id);
+    if (!sender) {
+      throw new NotFoundError("Sender not found");
+    }
+
+    // Mark violation
+    sender.violationCount = (sender.violationCount || 0) + 1;
+    sender.violationHistory = sender.violationHistory || [];
+    sender.violationHistory.push({
+      type: "warning",
+      timestamp: new Date(),
+      reason,
+    });
+
+    await sender.save();
+
+    // Publish notification event
+    const { publishEvent } = require("../utils/eventPublisher");
+    publishEvent("notifications", "warning_sent", {
+      userId: sender._id,
+      email: sender.email,
+      reason,
+      violationCount: sender.violationCount,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "Warning sent to sender",
+      senderId: sender._id,
+      violationCount: sender.violationCount,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/users/:userId/suspend
+ * Suspend a user account
+ */
+router.post("/users/:userId/suspend", async (req, res, next) => {
+  const { userId } = req.params;
+  const { reason = "Account suspended by admin" } = req.body || {};
+
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
+
+    if (user.isSuspended) {
+      return res.json({ message: "User is already suspended", userId });
+    }
+
+    await suspendUserAccount(userId, reason);
+
+    // Publish suspension event
+    const { publishEvent } = require("../utils/eventPublisher");
+    publishEvent("notifications", "account_suspended", {
+      userId: user._id,
+      email: user.email,
+      reason,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "User account suspended",
+      userId,
+      reason,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/users/:userId/unsuspend
+ * Unsuspend a user account
+ */
+router.post("/users/:userId/unsuspend", async (req, res, next) => {
+  const { userId } = req.params;
+  const { reason = "Account unsuspended by admin" } = req.body || {};
+
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new NotFoundError("User not found");
+    }
+
+    if (!user.isSuspended) {
+      return res.json({ message: "User is not suspended", userId });
+    }
+
+    await unsuspendUserAccount(userId);
+
+    // Publish unsuspension event
+    const { publishEvent } = require("../utils/eventPublisher");
+    publishEvent("notifications", "account_unsuspended", {
+      userId: user._id,
+      email: user.email,
+      reason,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "User account unsuspended",
+      userId,
     });
   } catch (error) {
     next(error);

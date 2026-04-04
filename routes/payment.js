@@ -1,8 +1,15 @@
 const express = require("express");
 const router = express.Router();
 const { publishEvent } = require("../middleware/eventNotification");
-const { validateRequest, validationRules } = require("../validators/inputValidator");
-const { ValidationError, NotFoundError, InternalServerError } = require("../errors/AppError");
+const {
+  validateRequest,
+  validationRules,
+} = require("../validators/inputValidator");
+const {
+  ValidationError,
+  NotFoundError,
+  InternalServerError,
+} = require("../errors/AppError");
 const PaymentRecord = require("../paymentRecord");
 const Subscription = require("../subscription");
 const { recordPaymentViolation } = require("../utils/activityScorer");
@@ -31,6 +38,8 @@ const successPaymentSchema = {
   plan: validationRules.plan,
 };
 
+const SINGLE_PAID_PLAN = "premium";
+
 /**
  * POST /api/payment/initialize
  * Create a payment record and initialize payment
@@ -40,20 +49,29 @@ router.post(
   validateRequest(initializePaymentSchema),
   async (req, res, next) => {
     const { plan, amount, email } = req.body;
+    if (String(plan || "").toLowerCase() !== SINGLE_PAID_PLAN) {
+      throw new ValidationError(
+        `Only the ${SINGLE_PAID_PLAN} plan is currently supported`,
+        "plan",
+      );
+    }
 
     try {
-      const activeSubscription = await Subscription.getUserActiveSubscription(req.user._id);
+      const activeSubscription = await Subscription.getUserActiveSubscription(
+        req.user._id,
+      );
       if (activeSubscription?.hasUsedActiveTopup) {
         throw new ValidationError(
           "Only one extra payment is allowed while your current subscription is active",
-          "subscription"
+          "subscription",
         );
       }
 
       // If the user is in an active trial and hasn't yet authorized their card,
       // only charge ₦50 for card authorization — the full amount is deferred.
       const isTrialAuth =
-        activeSubscription?.status === "trial" && !activeSubscription?.isCardAuthorized;
+        activeSubscription?.status === "trial" &&
+        !activeSubscription?.isCardAuthorized;
       const effectiveAmount = isTrialAuth ? 50 : amount;
       const recordType = isTrialAuth ? "trial_auth" : "payment";
 
@@ -63,7 +81,7 @@ router.post(
       const _paymentRecord = await PaymentRecord.createPaymentRecord({
         user_id: req.user._id,
         reference,
-        plan,
+        plan: SINGLE_PAID_PLAN,
         amount: effectiveAmount,
         email,
         type: recordType,
@@ -72,7 +90,7 @@ router.post(
       publishEvent("payment_events", "payment.initialized", {
         userId: req.user._id,
         reference,
-        plan,
+        plan: SINGLE_PAID_PLAN,
         amount: effectiveAmount,
         email,
         isTrialAuth,
@@ -87,7 +105,7 @@ router.post(
         isTrialAuth,
         paymentData: {
           reference,
-          plan,
+          plan: SINGLE_PAID_PLAN,
           amount: effectiveAmount,
           email,
         },
@@ -95,7 +113,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -109,12 +127,20 @@ router.post(
     const { reference, plan } = req.body;
 
     try {
+      if (String(plan || "").toLowerCase() !== SINGLE_PAID_PLAN) {
+        throw new ValidationError(
+          `Only the ${SINGLE_PAID_PLAN} plan is currently supported`,
+          "plan",
+        );
+      }
+
       if (!reference || typeof reference !== "string") {
         throw new ValidationError("Reference is required", "reference");
       }
 
       // Get payment record
-      const paymentRecord = await PaymentRecord.getPaymentByReference(reference);
+      const paymentRecord =
+        await PaymentRecord.getPaymentByReference(reference);
       if (!paymentRecord) {
         throw new NotFoundError("Payment record");
       }
@@ -129,7 +155,9 @@ router.post(
 
         // In non-production environments, allow local flow testing without external dependency.
         if (process.env.NODE_ENV === "production") {
-          throw new InternalServerError(paystackError.message || "Unable to verify payment with Paystack");
+          throw new InternalServerError(
+            paystackError.message || "Unable to verify payment with Paystack",
+          );
         }
         paystackData = {
           status: "success",
@@ -139,29 +167,41 @@ router.post(
       }
 
       if (!validatePaystackResponse(paystackData)) {
-        await PaymentRecord.updatePaymentStatus(reference, "failed", paystackData);
-        
+        await PaymentRecord.updatePaymentStatus(
+          reference,
+          "failed",
+          paystackData,
+        );
+
         // Record payment violation
         await recordPaymentViolation(req.user._id, "default");
-        
+
         throw new ValidationError("Payment verification failed", "reference");
       }
 
       // Update payment record
-      await PaymentRecord.updatePaymentStatus(reference, "verified", paystackData);
+      await PaymentRecord.updatePaymentStatus(
+        reference,
+        "verified",
+        paystackData,
+      );
 
       // If this is a trial card authorization, store the authorization code on the subscription
       if (paymentRecord.type === "trial_auth") {
         const authCode = paystackData.authorization?.authorization_code;
         if (authCode) {
-          await Subscription.saveAuthorizationCode(req.user._id, authCode, paymentRecord.email);
+          await Subscription.saveAuthorizationCode(
+            req.user._id,
+            authCode,
+            paymentRecord.email,
+          );
         }
       }
 
       publishEvent("payment_events", "payment.verified", {
         userId: req.user._id,
         reference,
-        plan,
+        plan: SINGLE_PAID_PLAN,
         amount: paymentRecord.amount,
         email: paymentRecord.email,
         timestamp: new Date(),
@@ -175,7 +215,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -189,12 +229,20 @@ router.post(
     const { reference, plan } = req.body;
 
     try {
+      if (String(plan || "").toLowerCase() !== SINGLE_PAID_PLAN) {
+        throw new ValidationError(
+          `Only the ${SINGLE_PAID_PLAN} plan is currently supported`,
+          "plan",
+        );
+      }
+
       if (!reference || typeof reference !== "string") {
         throw new ValidationError("Reference is required", "reference");
       }
 
       // Get payment record
-      const paymentRecord = await PaymentRecord.getPaymentByReference(reference);
+      const paymentRecord =
+        await PaymentRecord.getPaymentByReference(reference);
       if (!paymentRecord) {
         throw new NotFoundError("Payment record");
       }
@@ -202,7 +250,7 @@ router.post(
       if (paymentRecord.status !== "verified") {
         throw new ValidationError(
           "Payment must be verified before confirming success",
-          "reference"
+          "reference",
         );
       }
 
@@ -212,7 +260,8 @@ router.post(
         paymentRecord.status = "success";
         await paymentRecord.save();
         return res.json({
-          message: "Card authorized for future billing. You will be charged ₦5,000 when your free trial expires.",
+          message:
+            "Card authorized for future billing. You will be charged ₦5,000 when your free trial expires.",
           isCardAuthorization: true,
         });
       }
@@ -231,7 +280,7 @@ router.post(
             startDate: new Date(),
             endDate,
             reference,
-          }
+          },
         );
       } catch (subscriptionError) {
         if (subscriptionError.code === "ACTIVE_TOPUP_LIMIT_REACHED") {
@@ -263,7 +312,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -281,7 +330,7 @@ router.post("/close", async (req, res, next) => {
     if (subscription) {
       await Subscription.cancelSubscription(
         req.user._id,
-        "User-initiated cancellation"
+        "User-initiated cancellation",
       );
 
       // Record cancellation violation
@@ -313,7 +362,7 @@ router.post("/cancel-renewal", async (req, res, next) => {
         endDate: { $gt: new Date() },
       },
       { autoRenewal: false },
-      { new: true }
+      { new: true },
     );
 
     if (!subscription) {
@@ -327,8 +376,85 @@ router.post("/cancel-renewal", async (req, res, next) => {
     });
 
     res.json({
-      message: "Auto-renewal cancelled. Your subscription remains active until end date.",
+      message:
+        "Auto-renewal cancelled. Your subscription remains active until end date.",
       subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/payment/downgrade
+ * Schedule a downgrade to free access at subscription renewal date.
+ */
+router.post("/downgrade", async (req, res, next) => {
+  try {
+    const activeSubscription = await Subscription.getUserActiveSubscription(
+      req.user._id,
+    );
+
+    if (!activeSubscription) {
+      throw new NotFoundError("Active subscription");
+    }
+
+    if (activeSubscription.pendingDowngrade?.status === "scheduled") {
+      throw new ValidationError(
+        "A downgrade is already scheduled for this subscription",
+        "subscription",
+      );
+    }
+
+    const effectiveAt = activeSubscription.endDate;
+    const downgradedSubscription = await Subscription.scheduleDowngrade(
+      req.user._id,
+      null,
+      effectiveAt,
+    );
+
+    if (!downgradedSubscription) {
+      throw new NotFoundError("Active subscription");
+    }
+
+    publishEvent("payment_events", "payment.downgrade.scheduled", {
+      userId: req.user._id,
+      fromPlan: activeSubscription.plan,
+      toPlan: "free",
+      effectiveAt,
+      timestamp: new Date(),
+    });
+
+    res.json({
+      message: "Downgrade to free access scheduled successfully",
+      subscription: downgradedSubscription,
+      accessChange: {
+        from: activeSubscription.plan,
+        to: "free",
+        effectiveAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/payment/invoices
+ * Fetch user invoice records.
+ */
+router.get("/invoices", async (req, res, next) => {
+  try {
+    const invoices = await PaymentRecord.getInvoicesByUser(req.user._id, 50);
+    res.json({
+      invoices: invoices.map((invoice) => ({
+        reference: invoice.reference,
+        plan: invoice.plan,
+        amount: invoice.amount,
+        status: invoice.status,
+        createdAt: invoice.createdAt,
+        description: invoice.description || null,
+      })),
     });
   } catch (error) {
     next(error);
@@ -342,9 +468,11 @@ router.post("/cancel-renewal", async (req, res, next) => {
 router.get("/subscription", async (req, res, next) => {
   try {
     const subscription = await Subscription.getUserActiveSubscription(
-      req.user._id
+      req.user._id,
     );
-    const hasEverSubscribed = await Subscription.hasEverSubscribed(req.user._id);
+    const hasEverSubscribed = await Subscription.hasEverSubscribed(
+      req.user._id,
+    );
 
     if (!subscription) {
       return res.json({
@@ -367,7 +495,7 @@ router.get("/subscription", async (req, res, next) => {
         hasUsedActiveTopup: subscription.hasUsedActiveTopup,
         canMakeExtraPayment: !subscription.hasUsedActiveTopup,
         daysRemaining: Math.ceil(
-          (subscription.endDate - new Date()) / (1000 * 60 * 60 * 24)
+          (subscription.endDate - new Date()) / (1000 * 60 * 60 * 24),
         ),
         isTrialPeriod: subscription.isTrialPeriod,
         isCardAuthorized: subscription.isCardAuthorized,

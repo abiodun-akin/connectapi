@@ -6,6 +6,7 @@ jest.mock("../paymentRecord", () => ({
   getPaymentByReference: jest.fn(),
   updatePaymentStatus: jest.fn(),
   recordVerificationError: jest.fn(),
+  getInvoicesByUser: jest.fn(),
 }));
 
 jest.mock("../subscription", () => ({
@@ -15,6 +16,7 @@ jest.mock("../subscription", () => ({
   cancelSubscription: jest.fn(),
   findOne: jest.fn(),
   hasEverSubscribed: jest.fn(),
+  scheduleDowngrade: jest.fn(),
 }));
 
 jest.mock("../middleware/eventNotification", () => ({
@@ -66,7 +68,7 @@ describe("Payment Routes Integration", () => {
 
     const response = await request(app)
       .post("/api/payment/initialize")
-      .send({ plan: "basic", amount: 5000, email: "user@example.com" });
+      .send({ plan: "premium", amount: 5000, email: "user@example.com" });
 
     expect(response.status).toBe(200);
     expect(response.body.isTrialAuth).toBe(true);
@@ -75,13 +77,13 @@ describe("Payment Routes Integration", () => {
       expect.objectContaining({
         amount: 50,
         type: "trial_auth",
-        plan: "basic",
-      })
+        plan: "premium",
+      }),
     );
     expect(publishEvent).toHaveBeenCalledWith(
       "payment_events",
       "payment.initialized",
-      expect.objectContaining({ isTrialAuth: true, amount: 50 })
+      expect.objectContaining({ isTrialAuth: true, amount: 50 }),
     );
   });
 
@@ -103,13 +105,13 @@ describe("Payment Routes Integration", () => {
 
     const response = await request(app)
       .post("/api/payment/verify")
-      .send({ reference: "ref_trial_1", plan: "basic" });
+      .send({ reference: "ref_trial_1", plan: "premium" });
 
     expect(response.status).toBe(200);
     expect(Subscription.saveAuthorizationCode).toHaveBeenCalledWith(
       "user-123",
       "AUTH_demo_123",
-      "user@example.com"
+      "user@example.com",
     );
   });
 
@@ -123,11 +125,70 @@ describe("Payment Routes Integration", () => {
 
     const response = await request(app)
       .post("/api/payment/success")
-      .send({ reference: "ref_trial_1", plan: "basic" });
+      .send({ reference: "ref_trial_1", plan: "premium" });
 
     expect(response.status).toBe(200);
     expect(response.body.isCardAuthorization).toBe(true);
     expect(Subscription.createOrUpdateSubscription).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalled();
+  });
+
+  it("schedules downgrade to free access without creating invoice", async () => {
+    const subscription = {
+      _id: "sub-1",
+      plan: "premium",
+      amount: 12000,
+      endDate: new Date("2026-04-10T00:00:00.000Z"),
+    };
+
+    Subscription.getUserActiveSubscription.mockResolvedValue(subscription);
+    Subscription.scheduleDowngrade.mockResolvedValue({
+      ...subscription,
+      pendingDowngrade: {
+        targetPlan: null,
+        status: "scheduled",
+      },
+    });
+
+    const response = await request(app).post("/api/payment/downgrade");
+
+    expect(response.status).toBe(200);
+    expect(response.body.accessChange).toEqual(
+      expect.objectContaining({
+        from: "premium",
+        to: "free",
+      }),
+    );
+    expect(Subscription.scheduleDowngrade).toHaveBeenCalledWith(
+      "user-123",
+      null,
+      subscription.endDate,
+    );
+    expect(PaymentRecord.createPaymentRecord).not.toHaveBeenCalled();
+  });
+
+  it("returns user invoices", async () => {
+    PaymentRecord.getInvoicesByUser.mockResolvedValue([
+      {
+        reference: "inv_1",
+        plan: "basic",
+        amount: 5000,
+        status: "pending",
+        createdAt: new Date("2026-04-01T00:00:00.000Z"),
+        description: "Scheduled downgrade invoice",
+      },
+    ]);
+
+    const response = await request(app).get("/api/payment/invoices");
+
+    expect(response.status).toBe(200);
+    expect(response.body.invoices).toHaveLength(1);
+    expect(response.body.invoices[0]).toEqual(
+      expect.objectContaining({
+        reference: "inv_1",
+        plan: "basic",
+        amount: 5000,
+      }),
+    );
   });
 });

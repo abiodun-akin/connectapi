@@ -5,6 +5,60 @@ const UserProfile = require("../userProfile");
 const { calculateTotalActivityScore } = require("../utils/activityScorer");
 const { NotFoundError, ValidationError } = require("../errors/AppError");
 
+const toRadians = (value) => (Number(value) * Math.PI) / 180;
+
+const getDistanceKm = (lat1, lon1, lat2, lon2) => {
+  const aLat = Number(lat1);
+  const aLon = Number(lon1);
+  const bLat = Number(lat2);
+  const bLon = Number(lon2);
+
+  if ([aLat, aLon, bLat, bLon].some((value) => Number.isNaN(value))) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(bLat - aLat);
+  const dLon = toRadians(bLon - aLon);
+  const c1 = Math.sin(dLat / 2) * Math.sin(dLat / 2);
+  const c2 =
+    Math.cos(toRadians(aLat)) *
+    Math.cos(toRadians(bLat)) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(c1 + c2), Math.sqrt(1 - (c1 + c2)));
+  return Math.round(earthRadiusKm * c);
+};
+
+const computeOverlapScore = (requesterProfile, matchedProfile) => {
+  const requesterIsFarmer = requesterProfile.profileType === "farmer";
+  const requesterItems = requesterIsFarmer
+    ? requesterProfile.farmerDetails?.farmingAreas || []
+    : requesterProfile.vendorDetails?.servicesOffered || [];
+  const matchedItems = requesterIsFarmer
+    ? matchedProfile.vendorDetails?.servicesOffered || []
+    : matchedProfile.farmerDetails?.farmingAreas || [];
+
+  if (!requesterItems.length || !matchedItems.length) {
+    return 0;
+  }
+
+  const requesterSet = new Set(
+    requesterItems.map((item) => String(item).toLowerCase()),
+  );
+  const matchedSet = new Set(
+    matchedItems.map((item) => String(item).toLowerCase()),
+  );
+  let overlap = 0;
+  requesterSet.forEach((item) => {
+    if (matchedSet.has(item)) {
+      overlap += 1;
+    }
+  });
+
+  return Math.min(20, overlap * 5);
+};
+
 /**
  * GET /api/matches
  * Get matches for current user (farmers get vendor matches, vendors get farmer matches)
@@ -16,6 +70,10 @@ router.get("/", async (req, res, next) => {
     page = 1,
     country,
     state,
+    service,
+    farmingArea,
+    minScore,
+    maxDistanceKm,
   } = req.query;
 
   try {
@@ -31,8 +89,14 @@ router.get("/", async (req, res, next) => {
     const query = {};
     const normalizedCountry = String(country || "").trim();
     const normalizedState = String(state || "").trim();
-    const targetProfileType = userProfile.profileType === "farmer" ? "vendor" : "farmer";
-    const targetMatchField = userProfile.profileType === "farmer" ? "vendor_id" : "farmer_id";
+    const normalizedService = String(service || "").trim();
+    const normalizedFarmingArea = String(farmingArea || "").trim();
+    const minRecommendationScore = Number(minScore);
+    const maxDistance = Number(maxDistanceKm);
+    const targetProfileType =
+      userProfile.profileType === "farmer" ? "vendor" : "farmer";
+    const targetMatchField =
+      userProfile.profileType === "farmer" ? "vendor_id" : "farmer_id";
 
     if (userProfile.profileType === "farmer") {
       query.farmer_id = req.user._id;
@@ -40,13 +104,21 @@ router.get("/", async (req, res, next) => {
       query.vendor_id = req.user._id;
     }
 
-    if (status && ["potential", "interested", "connected", "archived"].includes(status)) {
+    if (
+      status &&
+      ["potential", "interested", "connected", "archived"].includes(status)
+    ) {
       query.status = status;
     } else {
       query.status = { $in: ["potential", "interested", "connected"] };
     }
 
-    if (normalizedCountry || normalizedState) {
+    if (
+      normalizedCountry ||
+      normalizedState ||
+      normalizedService ||
+      normalizedFarmingArea
+    ) {
       const profileFilter = {
         profileType: targetProfileType,
         isProfileComplete: true,
@@ -60,7 +132,22 @@ router.get("/", async (req, res, next) => {
         profileFilter.state = { $regex: normalizedState, $options: "i" };
       }
 
-      const profileUserIds = await UserProfile.find(profileFilter).distinct("user_id");
+      if (normalizedService) {
+        profileFilter["vendorDetails.servicesOffered"] = {
+          $regex: normalizedService,
+          $options: "i",
+        };
+      }
+
+      if (normalizedFarmingArea) {
+        profileFilter["farmerDetails.farmingAreas"] = {
+          $regex: normalizedFarmingArea,
+          $options: "i",
+        };
+      }
+
+      const profileUserIds =
+        await UserProfile.find(profileFilter).distinct("user_id");
 
       if (profileUserIds.length === 0) {
         return res.json({
@@ -74,6 +161,12 @@ router.get("/", async (req, res, next) => {
           appliedFilters: {
             country: normalizedCountry || null,
             state: normalizedState || null,
+            service: normalizedService || null,
+            farmingArea: normalizedFarmingArea || null,
+            minScore: Number.isFinite(minRecommendationScore)
+              ? minRecommendationScore
+              : null,
+            maxDistanceKm: Number.isFinite(maxDistance) ? maxDistance : null,
           },
         });
       }
@@ -84,8 +177,6 @@ router.get("/", async (req, res, next) => {
     const skip = (page - 1) * limit;
     const matches = await Match.find(query)
       .sort({ matchScore: -1 })
-      .limit(parseInt(limit))
-      .skip(skip)
       .populate({
         path: userProfile.profileType === "farmer" ? "vendor_id" : "farmer_id",
         select: "email",
@@ -98,12 +189,33 @@ router.get("/", async (req, res, next) => {
     const enrichedMatches = await Promise.all(
       matches.map(async (match) => {
         const matchedUserId =
-          userProfile.profileType === "farmer" ? match.vendor_id._id : match.farmer_id._id;
-        const matchedProfile = await UserProfile.findOne({ user_id: matchedUserId });
+          userProfile.profileType === "farmer"
+            ? match.vendor_id._id
+            : match.farmer_id._id;
+        const matchedProfile = await UserProfile.findOne({
+          user_id: matchedUserId,
+        });
 
         const farmerScore = await calculateTotalActivityScore(match.farmer_id);
         const vendorScore = await calculateTotalActivityScore(match.vendor_id);
-        const computedMatchScore = Math.round((farmerScore + vendorScore) / 2);
+        const baseActivityScore = Math.round((farmerScore + vendorScore) / 2);
+        const overlapScore = computeOverlapScore(
+          userProfile,
+          matchedProfile || {},
+        );
+        const distanceKm = getDistanceKm(
+          userProfile.latitude,
+          userProfile.longitude,
+          matchedProfile?.latitude,
+          matchedProfile?.longitude,
+        );
+        const distancePenalty = Number.isFinite(distanceKm)
+          ? Math.min(20, Math.floor(distanceKm / 100))
+          : 0;
+        const computedMatchScore = Math.max(
+          0,
+          Math.min(100, baseActivityScore + overlapScore - distancePenalty),
+        );
 
         return {
           _id: match._id,
@@ -115,6 +227,12 @@ router.get("/", async (req, res, next) => {
           activityScores: {
             farmer: farmerScore,
             vendor: vendorScore,
+          },
+          recommendationMeta: {
+            baseActivityScore,
+            overlapScore,
+            distanceKm,
+            distancePenalty,
           },
           userProfile: matchedProfile && {
             profileType: matchedProfile.profileType,
@@ -132,23 +250,51 @@ router.get("/", async (req, res, next) => {
             }),
           },
         };
-      })
+      }),
     );
 
-    enrichedMatches.sort((a, b) => b.matchScore - a.matchScore);
+    const filteredMatches = enrichedMatches.filter((matchItem) => {
+      if (
+        Number.isFinite(minRecommendationScore) &&
+        matchItem.matchScore < minRecommendationScore
+      ) {
+        return false;
+      }
+
+      if (
+        Number.isFinite(maxDistance) &&
+        Number.isFinite(matchItem.recommendationMeta?.distanceKm) &&
+        matchItem.recommendationMeta.distanceKm > maxDistance
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+
+    filteredMatches.sort((a, b) => b.matchScore - a.matchScore);
+    const pageLimit = parseInt(limit, 10);
+    const pagedMatches = filteredMatches.slice(skip, skip + pageLimit);
 
     res.json({
-      matches: enrichedMatches,
+      matches: pagedMatches,
       pagination: {
-        total,
+        total: filteredMatches.length,
         page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit),
+        limit: pageLimit,
+        pages: Math.ceil(filteredMatches.length / pageLimit),
       },
       appliedFilters: {
         country: normalizedCountry || null,
         state: normalizedState || null,
+        service: normalizedService || null,
+        farmingArea: normalizedFarmingArea || null,
+        minScore: Number.isFinite(minRecommendationScore)
+          ? minRecommendationScore
+          : null,
+        maxDistanceKm: Number.isFinite(maxDistance) ? maxDistance : null,
       },
+      queryTotal: total,
     });
   } catch (error) {
     next(error);
@@ -168,8 +314,10 @@ router.post("/:matchId/express-interest", async (req, res, next) => {
     }
 
     // Verify user is part of this match
-    if (match.farmer_id.toString() !== req.user._id.toString() &&
-        match.vendor_id.toString() !== req.user._id.toString()) {
+    if (
+      match.farmer_id.toString() !== req.user._id.toString() &&
+      match.vendor_id.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         error: "Not authorized to update this match",
         code: "UNAUTHORIZED",
@@ -229,7 +377,10 @@ router.post("/create-from-interest", async (req, res, next) => {
 
   try {
     if (!farmerId || !vendorId) {
-      throw new ValidationError("Both farmerId and vendorId are required", "farmerId");
+      throw new ValidationError(
+        "Both farmerId and vendorId are required",
+        "farmerId",
+      );
     }
 
     const match = await Match.createMatch({
@@ -262,8 +413,10 @@ router.get("/:matchId", async (req, res, next) => {
     }
 
     // Verify user has access to this match
-    if (match.farmer_id._id.toString() !== req.user._id.toString() &&
-        match.vendor_id._id.toString() !== req.user._id.toString()) {
+    if (
+      match.farmer_id._id.toString() !== req.user._id.toString() &&
+      match.vendor_id._id.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         error: "Not authorized to view this match",
         code: "UNAUTHORIZED",
@@ -289,8 +442,10 @@ router.delete("/:matchId", async (req, res, next) => {
     }
 
     // Verify user is part of this match
-    if (match.farmer_id.toString() !== req.user._id.toString() &&
-        match.vendor_id.toString() !== req.user._id.toString()) {
+    if (
+      match.farmer_id.toString() !== req.user._id.toString() &&
+      match.vendor_id.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         error: "Not authorized to delete this match",
         code: "UNAUTHORIZED",

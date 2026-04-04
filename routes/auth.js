@@ -37,23 +37,31 @@ const resetPasswordSchema = {
 const verifyEmailSchema = {
   token: (token) => {
     if (!token || typeof token !== "string" || token.trim().length < 20) {
-      throw new ValidationError("Valid verification token is required", "token");
+      throw new ValidationError(
+        "Valid verification token is required",
+        "token",
+      );
     }
   },
 };
 
 const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "1d";
+const TWO_FACTOR_CHALLENGE_EXPIRATION = "10m";
+const TWO_FACTOR_CODE_EXPIRY_MS = 10 * 60 * 1000;
+const TWO_FACTOR_MAX_ATTEMPTS = 5;
 
 const extractAuthToken = (req) => {
   const authHeader = req.headers.authorization;
   return authHeader?.split(" ")[1] || req.cookies.jwt || null;
 };
 
-const getTokenSecret = () => process.env.TOKEN_SECRET || "fallback-secret-for-dev-only";
+const getTokenSecret = () =>
+  process.env.TOKEN_SECRET || "fallback-secret-for-dev-only";
 
-const signAuthToken = (userId) => jwt.sign({ id: userId }, getTokenSecret(), {
-  expiresIn: AUTH_TOKEN_EXPIRATION,
-});
+const signAuthToken = (userId) =>
+  jwt.sign({ id: userId }, getTokenSecret(), {
+    expiresIn: AUTH_TOKEN_EXPIRATION,
+  });
 
 const setAuthCookie = (res, token) => {
   res.cookie("jwt", token, {
@@ -66,13 +74,16 @@ const setAuthCookie = (res, token) => {
 
 const getRequestBaseUrl = (req) => {
   const forwardedProto = req.headers["x-forwarded-proto"];
-  const protocol = forwardedProto ? String(forwardedProto).split(",")[0].trim() : req.protocol;
+  const protocol = forwardedProto
+    ? String(forwardedProto).split(",")[0].trim()
+    : req.protocol;
   return `${protocol}://${req.get("host")}`;
 };
 
-const getFrontendOrigin = () => (process.env.FRONTEND_ORIGIN || "http://localhost:5173")
-  .trim()
-  .replace(/\/+$/, "");
+const getFrontendOrigin = () =>
+  (process.env.FRONTEND_ORIGIN || "http://localhost:5173")
+    .trim()
+    .replace(/\/+$/, "");
 
 const getFrontendCallbackUrl = (params = {}) => {
   const url = new URL("/auth/social/callback", getFrontendOrigin());
@@ -96,7 +107,16 @@ const getEmailVerificationUrl = (token) => {
   return url.toString();
 };
 
-const hashToken = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
+const hashToken = (value) =>
+  crypto.createHash("sha256").update(String(value)).digest("hex");
+
+const generateTwoFactorCode = () =>
+  String(Math.floor(100000 + Math.random() * 900000));
+
+const signTwoFactorChallenge = (userId) =>
+  jwt.sign({ id: userId, purpose: "two-factor" }, getTokenSecret(), {
+    expiresIn: TWO_FACTOR_CHALLENGE_EXPIRATION,
+  });
 
 const buildAuthEventMetadata = (req, extra = {}) => {
   const forwardedFor = String(req.headers["x-forwarded-for"] || "")
@@ -109,21 +129,19 @@ const buildAuthEventMetadata = (req, extra = {}) => {
     ipAddress,
     userAgent: req.get("user-agent") || null,
     requestId:
-      req.get("x-request-id")
-      || req.get("x-correlation-id")
-      || crypto.randomUUID(),
+      req.get("x-request-id") ||
+      req.get("x-correlation-id") ||
+      crypto.randomUUID(),
     method: req.method,
     path: req.originalUrl,
     location: {
       country:
-        req.get("cf-ipcountry")
-        || req.get("x-vercel-ip-country")
-        || req.get("x-country")
-        || null,
+        req.get("cf-ipcountry") ||
+        req.get("x-vercel-ip-country") ||
+        req.get("x-country") ||
+        null,
       region:
-        req.get("x-vercel-ip-country-region")
-        || req.get("x-region")
-        || null,
+        req.get("x-vercel-ip-country-region") || req.get("x-region") || null,
       city: req.get("x-vercel-ip-city") || req.get("x-city") || null,
     },
     ...extra,
@@ -137,8 +155,8 @@ const getSocialProviderConfig = (provider, req) => {
       clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
       clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
       redirectUri:
-        process.env.GOOGLE_OAUTH_REDIRECT_URI
-        || `${getRequestBaseUrl(req)}/api/auth/social/google/callback`,
+        process.env.GOOGLE_OAUTH_REDIRECT_URI ||
+        `${getRequestBaseUrl(req)}/api/auth/social/google/callback`,
       authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenUrl: "https://oauth2.googleapis.com/token",
       userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
@@ -156,8 +174,8 @@ const getSocialProviderConfig = (provider, req) => {
       clientId: process.env.MICROSOFT_OAUTH_CLIENT_ID,
       clientSecret: process.env.MICROSOFT_OAUTH_CLIENT_SECRET,
       redirectUri:
-        process.env.MICROSOFT_OAUTH_REDIRECT_URI
-        || `${getRequestBaseUrl(req)}/api/auth/social/microsoft/callback`,
+        process.env.MICROSOFT_OAUTH_REDIRECT_URI ||
+        `${getRequestBaseUrl(req)}/api/auth/social/microsoft/callback`,
       authorizationUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`,
       tokenUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       userInfoUrl: "https://graph.microsoft.com/oidc/userinfo",
@@ -177,7 +195,7 @@ const ensureProviderConfigured = (providerConfig) => {
   if (!providerConfig.clientId || !providerConfig.clientSecret) {
     throw new ValidationError(
       `${providerConfig.provider} social sign-in is not configured`,
-      providerConfig.provider
+      providerConfig.provider,
     );
   }
 };
@@ -210,6 +228,7 @@ const serializeAuthUser = async (user) => {
     id: user._id,
     name: user.name,
     email: user.email,
+    isEmailVerified: Boolean(user.isEmailVerified),
     isAdmin: user.isAdmin,
     isSuspended: user.isSuspended,
     isAgent: Boolean(user.isAgent),
@@ -217,13 +236,15 @@ const serializeAuthUser = async (user) => {
     profileType: profile?.profileType || null,
     isProfileComplete: Boolean(profile?.isProfileComplete),
     profileImageUrl: profile?.profileImageUrl || null,
-    authProvider: user.googleId && user.microsoftId
-      ? "multiple"
-      : user.googleId
-        ? "google"
-        : user.microsoftId
-          ? "microsoft"
-          : "local",
+    twoFactorEnabled: Boolean(user.twoFactorEnabled),
+    authProvider:
+      user.googleId && user.microsoftId
+        ? "multiple"
+        : user.googleId
+          ? "google"
+          : user.microsoftId
+            ? "microsoft"
+            : "local",
   };
 };
 
@@ -255,14 +276,65 @@ const resolveAuthenticatedSession = async (req) => {
   }
 
   if (
-    user.passwordChangedAt
-    && decodedToken.iat
-    && user.passwordChangedAt.getTime() > decodedToken.iat * 1000
+    user.passwordChangedAt &&
+    decodedToken.iat &&
+    user.passwordChangedAt.getTime() > decodedToken.iat * 1000
   ) {
     throw new AuthorizationError("Password changed. Please login again.");
   }
 
   return { user, token };
+};
+
+const resolveRefreshSession = async (req) => {
+  const token = extractAuthToken(req);
+
+  if (!token) {
+    throw new AuthenticationError("No authentication token provided");
+  }
+
+  let decodedToken;
+  try {
+    decodedToken = jwt.verify(token, getTokenSecret(), {
+      ignoreExpiration: true,
+    });
+  } catch (_error) {
+    throw new AuthenticationError("Invalid authentication token");
+  }
+
+  const refreshGraceSeconds = Number(
+    process.env.REFRESH_GRACE_SECONDS || 7 * 24 * 60 * 60,
+  );
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (
+    Number.isFinite(refreshGraceSeconds) &&
+    decodedToken.exp &&
+    nowSeconds > decodedToken.exp + refreshGraceSeconds
+  ) {
+    throw new AuthorizationError(
+      "Session is too old to refresh. Please login again.",
+    );
+  }
+
+  const user = await User.findById(decodedToken.id);
+  if (!user) {
+    throw new AuthenticationError("User not found");
+  }
+
+  if (user.isSuspended) {
+    throw new AuthorizationError("Account suspended");
+  }
+
+  if (
+    user.passwordChangedAt &&
+    decodedToken.iat &&
+    user.passwordChangedAt.getTime() > decodedToken.iat * 1000
+  ) {
+    throw new AuthorizationError("Password changed. Please login again.");
+  }
+
+  const refreshedToken = signAuthToken(user._id);
+  return { user, token: refreshedToken };
 };
 
 const exchangeAuthorizationCode = async (providerConfig, code) => {
@@ -274,11 +346,15 @@ const exchangeAuthorizationCode = async (providerConfig, code) => {
     redirect_uri: providerConfig.redirectUri,
   });
 
-  const response = await axios.post(providerConfig.tokenUrl, payload.toString(), {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+  const response = await axios.post(
+    providerConfig.tokenUrl,
+    payload.toString(),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
     },
-  });
+  );
 
   return response.data;
 };
@@ -296,13 +372,18 @@ const fetchSocialProfile = async (providerConfig, accessToken) => {
     .toLowerCase();
 
   if (!email) {
-    throw new AuthenticationError("Unable to resolve email from social account");
+    throw new AuthenticationError(
+      "Unable to resolve email from social account",
+    );
   }
 
   return {
     id: String(profile.sub || profile.id || "").trim(),
     email,
-    name: String(profile.name || `${profile.given_name || ""} ${profile.family_name || ""}`)
+    name: String(
+      profile.name ||
+        `${profile.given_name || ""} ${profile.family_name || ""}`,
+    )
       .replace(/\s+/g, " ")
       .trim(),
   };
@@ -316,7 +397,7 @@ const ensureTrialSubscription = async (userId) => {
   });
 
   if (!existingSub) {
-    await Subscription.createTrialSubscription(userId, "basic");
+    await Subscription.createTrialSubscription(userId, "premium");
   }
 };
 
@@ -341,8 +422,14 @@ const findOrCreateSocialUser = async (provider, profile) => {
     });
     isNewUser = true;
   } else {
-    if (profile.id && user[providerField] && user[providerField] !== profile.id) {
-      throw new ConflictError(`This ${provider} account is already linked to another user`);
+    if (
+      profile.id &&
+      user[providerField] &&
+      user[providerField] !== profile.id
+    ) {
+      throw new ConflictError(
+        `This ${provider} account is already linked to another user`,
+      );
     }
 
     user[providerField] = user[providerField] || profile.id;
@@ -376,11 +463,14 @@ const applyPromoCodeOnSignup = async (promoCodeRaw, recruitUserId) => {
       },
     },
     { $inc: { redemptionCount: 1 } },
-    { new: true }
+    { new: true },
   );
 
   if (!incremented) {
-    throw new ValidationError("Promo code redemption limit reached", "promoCode");
+    throw new ValidationError(
+      "Promo code redemption limit reached",
+      "promoCode",
+    );
   }
 
   const rebateAmount = Number(incremented.rebateValue || 0);
@@ -414,68 +504,105 @@ const applyPromoCodeOnSignup = async (promoCodeRaw, recruitUserId) => {
   };
 };
 
-router.post("/signup", validateRequest(signupSchema), async (req, res, next) => {
-  const { name, email, password, promoCode } = req.body;
+router.post(
+  "/signup",
+  validateRequest(signupSchema),
+  async (req, res, next) => {
+    const { name, email, password, promoCode } = req.body;
 
-  try {
-    const user = await User.signup({ name, email, password });
-    user.lastLogin = new Date();
-    const verifyToken = user.createEmailVerificationToken();
-    await user.save();
+    try {
+      const user = await User.signup({ name, email, password });
+      user.lastLogin = new Date();
+      const verifyToken = user.createEmailVerificationToken();
+      await user.save();
 
-    await ensureTrialSubscription(user._id);
+      await ensureTrialSubscription(user._id);
 
-    const promoAttribution = await applyPromoCodeOnSignup(promoCode, user._id);
+      const promoAttribution = await applyPromoCodeOnSignup(
+        promoCode,
+        user._id,
+      );
 
-    const token = signAuthToken(user._id);
-    setAuthCookie(res, token);
+      const token = signAuthToken(user._id);
+      setAuthCookie(res, token);
 
-    const authUser = await serializeAuthUser(user);
+      const authUser = await serializeAuthUser(user);
 
-    publishEvent("auth_events", "auth.signup", {
-      userId: user._id,
-      email: user.email,
-      name: user.name,
-      promoCode: promoAttribution?.code || null,
-      rebateAmount: promoAttribution?.rebateAmount || 0,
-      ...buildAuthEventMetadata(req, {
-        authMethod: "password",
-      }),
-    });
+      publishEvent("auth_events", "auth.signup", {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        promoCode: promoAttribution?.code || null,
+        rebateAmount: promoAttribution?.rebateAmount || 0,
+        ...buildAuthEventMetadata(req, {
+          authMethod: "password",
+        }),
+      });
 
-    publishEvent("auth_events", "auth.email_verification_requested", {
-      userId: user._id,
-      email: user.email,
-      name: user.name,
-      verifyUrl: getEmailVerificationUrl(verifyToken),
-      expiresInHours: 24,
-    });
+      publishEvent("auth_events", "auth.email_verification_requested", {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        verifyUrl: getEmailVerificationUrl(verifyToken),
+        expiresInHours: 24,
+      });
 
-    res.status(201).json({
-      message: "User created successfully",
-      user: {
-        ...authUser,
-        referredPromoCode: promoAttribution?.code || null,
-      },
-      trial: {
-        firstChargeAmount: 0,
-        autoRenewalEnabled: true,
-      },
-      token,
-    });
-  } catch (error) {
-    if (error.code === 11000) {
-      return next(new ConflictError("Email already registered"));
+      res.status(201).json({
+        message: "User created successfully",
+        user: {
+          ...authUser,
+          referredPromoCode: promoAttribution?.code || null,
+        },
+        trial: {
+          firstChargeAmount: 0,
+          autoRenewalEnabled: true,
+        },
+        token,
+      });
+    } catch (error) {
+      if (error.code === 11000) {
+        return next(new ConflictError("Email already registered"));
+      }
+      next(error);
     }
-    next(error);
-  }
-});
+  },
+);
 
 router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
   const { email, password } = req.body;
 
   try {
     const user = await User.login({ email, password });
+
+    if (user.twoFactorEnabled) {
+      const code = generateTwoFactorCode();
+      user.twoFactorCodeHash = hashToken(code);
+      user.twoFactorCodeExpiresAt = new Date(
+        Date.now() + TWO_FACTOR_CODE_EXPIRY_MS,
+      );
+      user.twoFactorAttemptCount = 0;
+      await user.save();
+
+      const challengeToken = signTwoFactorChallenge(user._id);
+
+      publishEvent("auth_events", "auth.two_factor_requested", {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        code,
+        expiresInMinutes: 10,
+        ...buildAuthEventMetadata(req, {
+          authMethod: "password+2fa",
+        }),
+      });
+
+      return res.status(202).json({
+        message: "Two-factor authentication code sent",
+        requiresTwoFactor: true,
+        challengeToken,
+      });
+    }
+
     user.lastLogin = new Date();
     await user.save();
 
@@ -502,15 +629,210 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
   }
 });
 
+router.post("/2fa/verify", async (req, res, next) => {
+  const { challengeToken, code } = req.body || {};
+
+  try {
+    if (!challengeToken || typeof challengeToken !== "string") {
+      throw new ValidationError(
+        "Challenge token is required",
+        "challengeToken",
+      );
+    }
+
+    if (!code || typeof code !== "string") {
+      throw new ValidationError("A valid code is required", "code");
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(challengeToken, getTokenSecret());
+    } catch (_error) {
+      throw new AuthorizationError("Two-factor challenge has expired");
+    }
+
+    if (decoded.purpose !== "two-factor") {
+      throw new AuthorizationError("Invalid two-factor challenge");
+    }
+
+    const user = await User.findById(decoded.id).select(
+      "+twoFactorCodeHash +twoFactorCodeExpiresAt +twoFactorAttemptCount +twoFactorRecoveryCodes",
+    );
+
+    if (!user || !user.twoFactorEnabled) {
+      throw new AuthenticationError(
+        "User not available for two-factor verification",
+      );
+    }
+
+    // Check if code is a recovery code (8-char hex uppercase)
+    const isRecoveryCode = /^[A-F0-9]{8}$/.test(String(code).trim().toUpperCase());
+    
+    if (isRecoveryCode) {
+      // Validate recovery code
+      const codeToCheck = String(code).trim().toUpperCase();
+      if (!user.validateRecoveryCode(codeToCheck)) {
+        throw new AuthenticationError("Invalid or already-used recovery code");
+      }
+    } else if (/^\d{6}$/.test(String(code))) {
+      // Validate TOTP code
+      if (!user.twoFactorCodeHash || !user.twoFactorCodeExpiresAt) {
+        throw new AuthorizationError("No active two-factor challenge");
+      }
+
+      if (new Date(user.twoFactorCodeExpiresAt) <= new Date()) {
+        user.twoFactorCodeHash = null;
+        user.twoFactorCodeExpiresAt = null;
+        user.twoFactorAttemptCount = 0;
+        await user.save();
+        throw new AuthorizationError("Two-factor code has expired");
+      }
+
+      if ((user.twoFactorAttemptCount || 0) >= TWO_FACTOR_MAX_ATTEMPTS) {
+        user.twoFactorCodeHash = null;
+        user.twoFactorCodeExpiresAt = null;
+        user.twoFactorAttemptCount = 0;
+        await user.save();
+        throw new AuthorizationError(
+          "Too many invalid attempts. Please login again.",
+        );
+      }
+
+      if (hashToken(code) !== user.twoFactorCodeHash) {
+        user.twoFactorAttemptCount = (user.twoFactorAttemptCount || 0) + 1;
+        await user.save();
+        throw new AuthenticationError("Invalid two-factor code");
+      }
+    } else {
+      throw new ValidationError("A valid 6-digit TOTP code or recovery code is required", "code");
+    }
+
+    user.twoFactorCodeHash = null;
+    user.twoFactorCodeExpiresAt = null;
+    user.twoFactorAttemptCount = 0;
+    user.lastLogin = new Date();
+    await user.save();
+
+    const token = signAuthToken(user._id);
+    setAuthCookie(res, token);
+    const authUser = await serializeAuthUser(user);
+
+    publishEvent("auth_events", "auth.login", {
+      userId: user._id,
+      email: user.email,
+      ...buildAuthEventMetadata(req, {
+        authMethod: "2fa",
+      }),
+    });
+
+    res.json({
+      message: "Two-factor verification successful",
+      user: authUser,
+      token,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/2fa/enable", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    user.twoFactorEnabled = true;
+    user.twoFactorCodeHash = null;
+    user.twoFactorCodeExpiresAt = null;
+    user.twoFactorAttemptCount = 0;
+    
+    // Generate recovery codes
+    const plainCodes = User.generateRecoveryCodes();
+    user.setRecoveryCodes(plainCodes);
+    
+    await user.save();
+
+    res.json({
+      message: "Two-factor authentication enabled",
+      recoveryCodes: plainCodes,
+      status: "Store these codes in a safe place. Each code can be used once if you lose access to your authenticator app.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/2fa/disable", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    user.twoFactorEnabled = false;
+    user.twoFactorCodeHash = null;
+    user.twoFactorCodeExpiresAt = null;
+    user.twoFactorAttemptCount = 0;
+    user.twoFactorRecoveryCodes = [];
+    user.twoFactorRecoveryCodesGeneratedAt = null;
+    await user.save();
+
+    res.json({ message: "Two-factor authentication disabled" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /2fa/recovery-codes
+ * Get recovery code status (count and remaining)
+ */
+router.get("/2fa/recovery-codes", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    const status = user.getRecoveryCodeStatus();
+    res.json({
+      recoveryCodes: status,
+      message: `You have ${status.remaining} recovery codes remaining`,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /2fa/recovery-codes/regenerate
+ * Generate new recovery codes (invalidates old ones)
+ */
+router.post("/2fa/recovery-codes/regenerate", async (req, res, next) => {
+  try {
+    const { user } = await resolveAuthenticatedSession(req);
+    
+    if (!user.twoFactorEnabled) {
+      throw new ValidationError(
+        "Two-factor authentication is not enabled",
+        "twoFactor"
+      );
+    }
+    
+    const plainCodes = User.generateRecoveryCodes();
+    user.setRecoveryCodes(plainCodes);
+    await user.save();
+
+    res.json({
+      recoveryCodes: plainCodes,
+      message: "New recovery codes generated. Store them in a safe place.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post(
   "/forgot-password",
   validateRequest(forgotPasswordSchema),
   async (req, res, next) => {
     const { email } = req.body;
-    const responseMessage = "If an account exists for that email, a password reset link has been sent.";
+    const responseMessage =
+      "If an account exists for that email, a password reset link has been sent.";
 
     try {
-      const user = await User.findOne({ email: String(email).trim().toLowerCase() });
+      const user = await User.findOne({
+        email: String(email).trim().toLowerCase(),
+      });
 
       if (user) {
         const resetToken = user.createPasswordResetToken();
@@ -532,7 +854,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 router.post(
@@ -548,7 +870,10 @@ router.post(
       });
 
       if (!user) {
-        throw new ValidationError("Reset link is invalid or has expired", "token");
+        throw new ValidationError(
+          "Reset link is invalid or has expired",
+          "token",
+        );
       }
 
       user.password = await bcrypt.hash(password, 12);
@@ -576,7 +901,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 router.get("/session", async (req, res, next) => {
@@ -586,6 +911,31 @@ router.get("/session", async (req, res, next) => {
 
     res.json({
       message: "Session active",
+      user: authUser,
+      token,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/refresh", async (req, res, next) => {
+  try {
+    const { user, token } = await resolveRefreshSession(req);
+    const authUser = await serializeAuthUser(user);
+
+    setAuthCookie(res, token);
+
+    publishEvent("auth_events", "auth.refresh", {
+      userId: user._id,
+      email: user.email,
+      ...buildAuthEventMetadata(req, {
+        authMethod: "refresh",
+      }),
+    });
+
+    res.json({
+      message: "Session refreshed",
       user: authUser,
       token,
     });
@@ -609,19 +959,24 @@ router.get("/social/:provider/start", async (req, res) => {
         nonce: crypto.randomBytes(12).toString("hex"),
       },
       getTokenSecret(),
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     const authorizationUrl = new URL(providerConfig.authorizationUrl);
     authorizationUrl.searchParams.set("client_id", providerConfig.clientId);
-    authorizationUrl.searchParams.set("redirect_uri", providerConfig.redirectUri);
+    authorizationUrl.searchParams.set(
+      "redirect_uri",
+      providerConfig.redirectUri,
+    );
     authorizationUrl.searchParams.set("response_type", "code");
     authorizationUrl.searchParams.set("scope", providerConfig.scope);
     authorizationUrl.searchParams.set("state", state);
 
-    Object.entries(providerConfig.extraAuthParams || {}).forEach(([key, value]) => {
-      authorizationUrl.searchParams.set(key, value);
-    });
+    Object.entries(providerConfig.extraAuthParams || {}).forEach(
+      ([key, value]) => {
+        authorizationUrl.searchParams.set(key, value);
+      },
+    );
 
     return res.redirect(authorizationUrl.toString());
   } catch (error) {
@@ -642,7 +997,9 @@ router.get("/social/:provider/callback", async (req, res) => {
     ensureProviderConfigured(providerConfig);
 
     if (req.query.error) {
-      throw new AuthenticationError(String(req.query.error_description || req.query.error));
+      throw new AuthenticationError(
+        String(req.query.error_description || req.query.error),
+      );
     }
 
     if (!req.query.code || !req.query.state) {
@@ -654,8 +1011,14 @@ router.get("/social/:provider/callback", async (req, res) => {
       throw new AuthenticationError("Invalid social authentication state");
     }
 
-    const tokenSet = await exchangeAuthorizationCode(providerConfig, String(req.query.code));
-    const profile = await fetchSocialProfile(providerConfig, tokenSet.access_token);
+    const tokenSet = await exchangeAuthorizationCode(
+      providerConfig,
+      String(req.query.code),
+    );
+    const profile = await fetchSocialProfile(
+      providerConfig,
+      tokenSet.access_token,
+    );
     const { user, isNewUser } = await findOrCreateSocialUser(provider, profile);
 
     if (user.isSuspended) {
@@ -685,14 +1048,14 @@ router.get("/social/:provider/callback", async (req, res) => {
         mode: state.mode,
         status: "success",
         newUser: isNewUser,
-      })
+      }),
     );
   } catch (error) {
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
         error: error.message || "Social authentication failed",
-      })
+      }),
     );
   }
 });
@@ -743,13 +1106,15 @@ router.post("/send-verification", async (req, res, next) => {
       Date.now() - user.emailVerificationLastSentAt.getTime() < COOLDOWN_MS
     ) {
       const secondsLeft = Math.ceil(
-        (COOLDOWN_MS - (Date.now() - user.emailVerificationLastSentAt.getTime())) / 1000
+        (COOLDOWN_MS -
+          (Date.now() - user.emailVerificationLastSentAt.getTime())) /
+          1000,
       );
       return next(
         new ValidationError(
           `Please wait ${secondsLeft} seconds before requesting another verification email.`,
-          "cooldown"
-        )
+          "cooldown",
+        ),
       );
     }
 
@@ -787,7 +1152,7 @@ router.post(
       if (!user) {
         throw new ValidationError(
           "Verification link is invalid or has expired.",
-          "token"
+          "token",
         );
       }
 
@@ -796,11 +1161,13 @@ router.post(
       user.emailVerificationExpiresAt = null;
       await user.save();
 
-      res.json({ message: "Email verified successfully. You can now sign in." });
+      res.json({
+        message: "Email verified successfully. You can now sign in.",
+      });
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 module.exports = router;

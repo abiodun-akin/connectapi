@@ -56,6 +56,52 @@ const emailTemplates = {
       </div>
     `,
   },
+  "auth.email_verification_requested": {
+    subject: "Verify Your Email - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Verify your email address</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "there"},</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            Please confirm your Farm Connect email to unlock all account features.
+          </p>
+          <div style="margin: 24px 0; text-align: center;">
+            <a href="${data.verifyUrl || "#"}" style="display: inline-block; padding: 12px 18px; background: #2d8659; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
+              Verify Email
+            </a>
+          </div>
+          <p style="color: #777; font-size: 14px; line-height: 1.5;">
+            If the button does not work, copy and paste this link into your browser:
+          </p>
+          <p style="word-break: break-all; color: #2d8659; font-size: 14px;">${data.verifyUrl || "N/A"}</p>
+          <p style="color: #999; font-size: 13px; margin-top: 20px;">
+            This link expires in ${data.expiresInHours || 24} hours.
+          </p>
+        </div>
+      </div>
+    `,
+  },
+  "auth.two_factor_requested": {
+    subject: "Your Farm Connect 2FA Code",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Two-Factor Authentication</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "there"},</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            Use the code below to complete your sign in:
+          </p>
+          <div style="margin: 22px 0; text-align: center;">
+            <span style="display: inline-block; letter-spacing: 6px; font-size: 32px; font-weight: 700; color: #193325; background: #eef6f2; border-radius: 8px; padding: 10px 16px;">${data.code || "------"}</span>
+          </div>
+          <p style="color: #777; font-size: 14px; line-height: 1.5;">
+            This code expires in ${data.expiresInMinutes || 10} minutes. If you did not request this sign in, please reset your password.
+          </p>
+        </div>
+      </div>
+    `,
+  },
   "payment.initialized": {
     subject: "Payment Started - Farm Connect",
     html: (data) => `
@@ -142,14 +188,15 @@ const emailTemplates = {
     html: (data) => `
       <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
         <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
-          <h1 style="color: #e67e22;">⏰ Trial Ending in ${data.daysRemaining} Day${data.daysRemaining !== 1 ? 's' : ''}</h1>
+          <h1 style="color: #e67e22;">⏰ Trial Ending in ${data.daysRemaining} Day${data.daysRemaining !== 1 ? "s" : ""}</h1>
           <p style="color: #555; font-size: 16px;">Your Farm Connect free trial expires on <strong>${new Date(data.trialEndDate).toLocaleDateString()}</strong>.</p>
-          ${data.isCardAuthorized
-            ? `<div style="margin: 20px 0; padding: 16px; background: #eafaf1; border-left: 4px solid #27ae60; border-radius: 4px;">
+          ${
+            data.isCardAuthorized
+              ? `<div style="margin: 20px 0; padding: 16px; background: #eafaf1; border-left: 4px solid #27ae60; border-radius: 4px;">
                 <p style="color: #555; margin: 0;">✅ Your card is on file. <strong>₦5,000</strong> will be charged automatically when your trial ends.</p>
                </div>`
-            : `<div style="margin: 20px 0; padding: 16px; background: #fef9e7; border-left: 4px solid #f39c12; border-radius: 4px;">
-                <p style="color: #555; margin: 0;">⚠️ No payment method on file. Please <a href="${process.env.APP_URL || 'https://farmconnect.com'}/pricing" style="color: #2980b9;">set up billing</a> to continue after your trial.</p>
+              : `<div style="margin: 20px 0; padding: 16px; background: #fef9e7; border-left: 4px solid #f39c12; border-radius: 4px;">
+                <p style="color: #555; margin: 0;">⚠️ No payment method on file. Please <a href="${process.env.APP_URL || "https://farmconnect.com"}/pricing" style="color: #2980b9;">set up billing</a> to continue after your trial.</p>
                </div>`
           }
           <p style="color: #999; font-size: 14px; margin-top: 20px;">If you cancel before your trial ends, you will not be charged.</p>
@@ -166,7 +213,7 @@ const emailTemplates = {
           <p style="color: #555; font-size: 16px;">Your free trial has ended and your subscription has been activated.</p>
           <div style="margin: 20px 0; padding: 20px; background: #f0f7f4; border-left: 4px solid #27ae60; border-radius: 4px;">
             <p style="color: #555; margin: 5px 0;"><strong>Amount Charged:</strong> ₦${(data.amount || 5000).toLocaleString()}</p>
-            <p style="color: #555; margin: 5px 0;"><strong>Active Until:</strong> ${data.endDate ? new Date(data.endDate).toLocaleDateString() : 'N/A'}</p>
+            <p style="color: #555; margin: 5px 0;"><strong>Active Until:</strong> ${data.endDate ? new Date(data.endDate).toLocaleDateString() : "N/A"}</p>
           </div>
           <p style="color: #555; font-size: 16px;">Thank you for subscribing to Farm Connect!</p>
         </div>
@@ -180,9 +227,9 @@ const emailTemplates = {
         <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px;">
           <h1 style="color: #e74c3c;">Subscription Cancelled</h1>
           <p style="color: #555; font-size: 16px;">Your Farm Connect subscription has been cancelled.</p>
-          ${data.reason ? `<p style="color: #777; font-size: 14px;">Reason: ${data.reason}</p>` : ''}
+          ${data.reason ? `<p style="color: #777; font-size: 14px;">Reason: ${data.reason}</p>` : ""}
           <p style="color: #555; font-size: 16px; margin-top: 20px;">
-            You can <a href="${process.env.APP_URL || 'https://farmconnect.com'}/pricing" style="color: #2980b9;">resubscribe at any time</a>.
+            You can <a href="${process.env.APP_URL || "https://farmconnect.com"}/pricing" style="color: #2980b9;">resubscribe at any time</a>.
           </p>
         </div>
       </div>
@@ -203,9 +250,8 @@ const sendEmail = async (email, eventType, data) => {
       return;
     }
 
-    const htmlContent = typeof template.html === 'function' 
-      ? template.html(data) 
-      : template.html;
+    const htmlContent =
+      typeof template.html === "function" ? template.html(data) : template.html;
 
     await resend.emails.send({
       from: senderEmail,

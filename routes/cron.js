@@ -9,6 +9,7 @@ const router = express.Router();
 const {
   processTrialExpirations,
   processPaymentReminders,
+  processScheduledDowngrades,
   cancelOverdueTrials,
 } = require("../workers/trialWorker");
 const { processMessages } = require("../workers/cronJob");
@@ -39,10 +40,12 @@ router.post("/process-trials", verifyCronSecret, async (req, res) => {
 
     await processTrialExpirations();
     const paymentRemindersSent = await processPaymentReminders();
+    const scheduledDowngradesApplied = await processScheduledDowngrades();
 
     res.json({
       message: "Trial expiration processing completed",
       paymentRemindersSent,
+      scheduledDowngradesApplied,
       timestamp: new Date(),
     });
   } catch (error) {
