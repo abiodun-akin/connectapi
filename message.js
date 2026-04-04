@@ -98,22 +98,37 @@ messageSchema.index({ status: 1, createdAt: -1 });
 messageSchema.index({ "aiAnalysisResult.isSuspicious": 1 });
 
 // Pre-save hook: Analyze message content
-messageSchema.pre("save", function (next) {
+messageSchema.pre("save", async function (next) {
   if (!this.content && !this.attachment) {
     return next(new Error("Message must include content or attachment"));
   }
 
   if (!this.aiAnalysisResult) {
-    const analysis = analyzeMessage(this.content || "");
-    this.aiAnalysisResult = analysis;
+    try {
+      const analysis = await analyzeMessage(this.content || "");
+      this.aiAnalysisResult = analysis;
 
-    // Auto-flag if suspicious
-    if (analysis.isSuspicious) {
-      this.status = "flagged";
-      this.flagReason = "AI: " + analysis.reason;
+      // Auto-flag if suspicious
+      if (analysis.isSuspicious) {
+        this.status = "flagged";
+        this.flagReason = "AI: " + analysis.reason;
+      }
+      next();
+    } catch (error) {
+      console.error("[Message Analysis] Error:", error.message);
+      // Continue with patterns-only fallback
+      const { analyzeMessagePatterns } = require("./utils/messageAnalyzer");
+      const analysis = analyzeMessagePatterns(this.content || "");
+      this.aiAnalysisResult = analysis;
+      if (analysis.isSuspicious) {
+        this.status = "flagged";
+        this.flagReason = "AI: " + analysis.reason;
+      }
+      next();
     }
+  } else {
+    next();
   }
-  next();
 });
 
 // Static methods

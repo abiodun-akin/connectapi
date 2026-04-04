@@ -1,8 +1,10 @@
 /**
  * Message Analysis Utility
- * Analyzes messages for suspicious content using keyword matching and heuristics
- * This is a basic implementation that can be replaced with ML models or external APIs
+ * Primary: Google Gemini API for intelligent analysis
+ * Fallback: Pattern matching and heuristics
  */
+
+const geminiAnalyzer = require("./geminiAnalyzer");
 
 const suspiciousPatterns = {
   // Payment/fraud related
@@ -54,10 +56,10 @@ const warningKeywords = {
 };
 
 /**
- * Analyze message content for suspicious patterns
- * Returns risk assessment
+ * Pattern-based analysis (fallback)
+ * Analyzes messages for suspicious patterns
  */
-function analyzeMessage(content) {
+function analyzeMessagePatterns(content) {
   if (!content || typeof content !== "string") {
     return {
       isSuspicious: false,
@@ -174,9 +176,28 @@ function formatAnalysisResult(analysis) {
   };
 }
 
+/**
+ * Unified analysis: Gemini (primary) + Pattern Matching (fallback)
+ * IMPORTANT: This function is ASYNC - must use await
+ */
+async function analyzeMessage(content) {
+  // Get pattern analysis as fallback
+  const patternAnalysis = analyzeMessagePatterns(content);
+
+  // Try Gemini analysis
+  const geminiResult = await geminiAnalyzer.analyzeMessage(
+    content,
+    patternAnalysis
+  );
+
+  return geminiResult;
+}
+
 module.exports = {
-  analyzeMessage,
+  analyzeMessage, // Primary function - use this (async)
+  analyzeMessagePatterns, // Pattern-only fallback
   getRiskLevel,
   getRiskColor,
   formatAnalysisResult,
+  getGeminiStatus: geminiAnalyzer.getStatus,
 };
