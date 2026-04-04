@@ -81,15 +81,14 @@ const getRequestBaseUrl = (req) => {
 };
 
 const getFrontendOrigin = () => {
-  // Use environment variable if set, otherwise default to localhost:5173
+  // Always use environment variable - no hardcoded URLs
   let origin = process.env.FRONTEND_ORIGIN;
   
   if (!origin) {
-    // In development, use localhost:5173 (Vite dev server)
-    // In production, this should be set explicitly
-    origin = process.env.NODE_ENV === "production" 
-      ? "https://farmconnect-frontend.onrender.com"
-      : "http://localhost:5173";
+    throw new Error(
+      "FRONTEND_ORIGIN environment variable is not set. " +
+      "Set it to your frontend URL (e.g., https://farmapp.kwezitechnologiesltd.africa or http://localhost:80)"
+    );
   }
   
   return origin.trim().replace(/\/+$/, "");
