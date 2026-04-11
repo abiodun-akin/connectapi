@@ -12,7 +12,7 @@ const {
   processScheduledDowngrades,
   cancelOverdueTrials,
 } = require("../workers/trialWorker");
-const { processMessages } = require("../workers/cronJob");
+const { processMessages, getQueueStats } = require("../workers/cronJob");
 
 // Middleware to verify cron secret
 const verifyCronSecret = (req, res, next) => {
@@ -78,6 +78,30 @@ router.post("/process-notifications", verifyCronSecret, async (req, res) => {
     console.error("[Cron] Error in process-notifications:", error);
     res.status(500).json({
       error: "Error processing notifications",
+      code: "INTERNAL_ERROR",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/cron/queue-stats
+ * Return lightweight RabbitMQ notification queue stats
+ * Protected by CRON_SECRET header or query parameter
+ */
+router.get("/queue-stats", verifyCronSecret, async (req, res) => {
+  try {
+    const stats = await getQueueStats();
+
+    res.json({
+      message: "Notification queue stats fetched",
+      ...stats,
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    console.error("[Cron] Error in queue-stats:", error);
+    res.status(500).json({
+      error: "Error fetching queue stats",
       code: "INTERNAL_ERROR",
       message: error.message,
     });
