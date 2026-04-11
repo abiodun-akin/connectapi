@@ -9,8 +9,7 @@ const {
 } = require("../utils/notificationPreferences");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const senderEmail =
-  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
+const senderEmail = process.env.RESEND_FROM_EMAIL || "noreply@farmconnect.com";
 const isProduction = process.env.NODE_ENV === "production";
 
 const isRabbitConnectionError = (error) => {
@@ -253,7 +252,6 @@ const sendNotification = async (eventType, data = {}) => {
       (!inQuietHours || critical);
 
     let smsSent = false;
-    let emailSent = false;
 
     if (canUseSms) {
       smsSent = await sendSmsGateway({
@@ -266,7 +264,9 @@ const sendNotification = async (eventType, data = {}) => {
         console.log(
           `[Notify] SMS-gateway delivered ${eventType} to ${preferences.offline.phoneNumber}@${preferences.offline.gatewayDomain}`,
         );
-      } else if (!preferences.offline.fallbackToEmail && !critical) {
+      }
+
+      if (!preferences.offline.fallbackToEmail && !critical) {
         console.warn(
           `[Notify] SMS-gateway failed and email fallback disabled for ${eventType}`,
         );
@@ -274,28 +274,26 @@ const sendNotification = async (eventType, data = {}) => {
       }
     }
 
-    const shouldSendEmail = preferences.channels.email || critical;
-
-    if (shouldSendEmail) {
-      console.log(
-        `[Email] Sending ${eventType} to ${email} via Resend (from: ${senderEmail})`,
-      );
-      emailSent = await sendEmail(email, template.subject, htmlContent);
-      if (emailSent) {
-        console.log(`[Email] Sent ${eventType} to ${email}`);
-      } else {
-        console.error(`[Email] Failed to send ${eventType} to ${email}`);
+    if (!preferences.channels.email && !critical) {
+      if (!smsSent) {
+        console.warn(`[Notify] No delivery channel available for ${eventType}`);
       }
-    }
-
-    if (smsSent || emailSent) {
+      console.log(
+        `[Notify] Skipping ${eventType}: email channel disabled by user preferences`,
+      );
       return true;
     }
 
-    if (!shouldSendEmail && !smsSent) {
-      console.warn(`[Notify] No delivery channel available for ${eventType}`);
+    console.log(
+      `[Email] Sending ${eventType} to ${email} via Resend (from: ${senderEmail})`,
+    );
+    const sent = await sendEmail(email, template.subject, htmlContent);
+    if (sent) {
+      console.log(`[Email] Sent ${eventType} to ${email}`);
+      return true;
     }
 
+    console.error(`[Email] Failed to send ${eventType} to ${email}`);
     return false;
   } catch (error) {
     console.error(`[Notify] Exception sending ${eventType}:`, error.message);
@@ -364,12 +362,11 @@ const processMessages = async () => {
         );
         const sent = await sendNotification(eventType, data);
         if (!sent) {
+          // Leave message unacked so it is requeued when connection closes.
           console.warn(
-            `[Cron] Delivery failed for ${eventType} from ${queueName}; requeueing and continuing`,
+            `[Cron] Delivery failed for ${eventType} from ${queueName}; stopping queue drain to retry later`,
           );
-          channel.nack(msg, false, true);
-          msg = await channel.get(queueName);
-          continue;
+          break;
         }
 
         channel.ack(msg);

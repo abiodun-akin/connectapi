@@ -16,7 +16,6 @@ services:
       - NODE_ENV=development
       - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
       - RESEND_API_KEY=${RESEND_API_KEY}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-noreply@farmapp.kwezitechnologiesltd.africa}
     volumes:
       - ./:/home/node/app
     networks:
@@ -38,7 +37,6 @@ services:
     environment:
       - RABBITMQ_URL=amqps://psaryleg:dQ4hQKh6n92Xp6_rOzEzTE3c7YzTLLum@seal.lmq.cloudamqp.com/psaryleg
       - RESEND_API_KEY=${RESEND_API_KEY}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-noreply@farmapp.kwezitechnologiesltd.africa}
     volumes:
       - ./:/home/node/app
     networks:

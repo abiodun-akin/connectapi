@@ -85,21 +85,22 @@ const getRequestBaseUrl = (req) => {
   return `${protocol}://${req.get("host")}`;
 };
 
-const getFrontendOrigin = (req) => {
-  const configuredOrigin = process.env.FRONTEND_ORIGIN?.trim().replace(/\/+$/, "");
-  if (configuredOrigin) {
-    return configuredOrigin;
+const getFrontendOrigin = () => {
+  // Always use environment variable - no hardcoded URLs
+  let origin = process.env.FRONTEND_ORIGIN;
+
+  if (!origin) {
+    throw new Error(
+      "FRONTEND_ORIGIN environment variable is not set. " +
+        "Set it to your frontend URL (e.g., https://farmapp.kwezitechnologiesltd.africa or http://localhost:80)",
+    );
   }
 
-  if (req) {
-    return getRequestBaseUrl(req);
-  }
-
-  return "http://localhost:80";
+  return origin.trim().replace(/\/+$/, "");
 };
 
-const getFrontendCallbackUrl = (params = {}, req) => {
-  const url = new URL("/auth/social/callback", getFrontendOrigin(req));
+const getFrontendCallbackUrl = (params = {}) => {
+  const url = new URL("/auth/social/callback", getFrontendOrigin());
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {
       url.searchParams.set(key, String(value));
@@ -108,14 +109,14 @@ const getFrontendCallbackUrl = (params = {}, req) => {
   return url.toString();
 };
 
-const getPasswordResetUrl = (token, req) => {
-  const url = new URL("/reset-password", getFrontendOrigin(req));
+const getPasswordResetUrl = (token) => {
+  const url = new URL("/reset-password", getFrontendOrigin());
   url.searchParams.set("token", token);
   return url.toString();
 };
 
-const getEmailVerificationUrl = (token, req) => {
-  const url = new URL("/verify-email", getFrontendOrigin(req));
+const getEmailVerificationUrl = (token) => {
+  const url = new URL("/verify-email", getFrontendOrigin());
   url.searchParams.set("token", token);
   return url.toString();
 };
@@ -559,7 +560,7 @@ router.post(
         userId: user._id,
         email: user.email,
         name: user.name,
-        verifyUrl: getEmailVerificationUrl(verifyToken, req),
+        verifyUrl: getEmailVerificationUrl(verifyToken),
         expiresInHours: 24,
       });
 
@@ -1158,7 +1159,7 @@ router.post(
           userId: user._id,
           email: user.email,
           name: user.name,
-          resetUrl: getPasswordResetUrl(resetToken, req),
+          resetUrl: getPasswordResetUrl(resetToken),
           expiresInMinutes: 30,
           ...buildAuthEventMetadata(req, {
             authMethod: "password_reset",
@@ -1441,7 +1442,7 @@ router.post("/send-verification", async (req, res, next) => {
       userId: user._id,
       email: user.email,
       name: user.name,
-      verifyUrl: getEmailVerificationUrl(verifyToken, req),
+      verifyUrl: getEmailVerificationUrl(verifyToken),
       expiresInHours: 24,
       ...buildAuthEventMetadata(req, { authMethod: "email_verification" }),
     });

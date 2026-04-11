@@ -11,7 +11,7 @@ const {
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
-  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
+  process.env.RESEND_FROM_EMAIL || "noreply@kwezitechnologiesltd.africa";
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -283,19 +283,12 @@ const emailTemplates = {
 };
 
 const sendEmailRaw = async (email, subject, html) => {
-  if (!process.env.RESEND_API_KEY) {
-    console.error("[Email] RESEND_API_KEY not set — cannot send email");
-    return false;
-  }
-
-  const result = await resend.emails.send({
+  await resend.emails.send({
     from: senderEmail,
     to: email,
     subject,
     html,
   });
-
-  return !result?.error;
 };
 
 const loadNotificationContext = async (data = {}) => {
@@ -340,7 +333,7 @@ const formatSmsBody = (eventType, data = {}) => {
 
 const sendSmsGateway = async ({ phoneNumber, gatewayDomain, body }) => {
   const to = `${phoneNumber}@${gatewayDomain}`;
-  return sendEmailRaw(
+  await sendEmailRaw(
     to,
     "FarmConnect Alert",
     `<div style="font-family: Arial, sans-serif; white-space: pre-wrap;">${escapeHtml(body)}</div>`,
@@ -382,18 +375,16 @@ const sendEmail = async (_email, eventType, data) => {
       (!inQuietHours || critical);
 
     let smsDelivered = false;
-    let emailDelivered = false;
 
     if (canUseSms) {
       try {
-        smsDelivered = await sendSmsGateway({
+        await sendSmsGateway({
           phoneNumber: preferences.offline.phoneNumber,
           gatewayDomain: preferences.offline.gatewayDomain,
           body: formatSmsBody(eventType, data),
         });
-        if (smsDelivered) {
-          console.log(`✓ SMS-gateway delivered for ${eventType}`);
-        }
+        smsDelivered = true;
+        console.log(`✓ SMS-gateway delivered for ${eventType}`);
       } catch (smsError) {
         console.error(
           `✗ SMS-gateway failed for ${eventType}:`,
@@ -405,24 +396,16 @@ const sendEmail = async (_email, eventType, data) => {
       }
     }
 
-    const shouldSendEmail = preferences.channels.email || critical;
-
-    if (shouldSendEmail) {
-      emailDelivered = await sendEmailRaw(email, template.subject, htmlContent);
-      if (emailDelivered) {
-        console.log(`✓ Email sent for ${eventType} to ${email}`);
-      } else {
-        console.error(`✗ Failed to send email for ${eventType} to ${email}`);
+    if (!preferences.channels.email && !critical) {
+      if (!smsDelivered) {
+        console.warn(`⚠️ No delivery channel available for ${eventType}`);
       }
+      return;
     }
 
-    if (smsDelivered || emailDelivered) {
-      return true;
-    }
+    await sendEmailRaw(email, template.subject, htmlContent);
 
-    if (!shouldSendEmail && !smsDelivered) {
-      console.warn(`⚠️ No delivery channel available for ${eventType}`);
-    }
+    console.log(`✓ Email sent for ${eventType} to ${email}`);
   } catch (error) {
     console.error(`✗ Failed to send email for ${eventType}:`, error.message);
   }
@@ -460,12 +443,8 @@ const startWorker = async () => {
         try {
           const data = JSON.parse(msg.content.toString());
           const eventType = msg.fields.routingKey;
-          const delivered = await sendEmail(data.email, eventType, data);
-          if (delivered) {
-            channel.ack(msg);
-          } else {
-            channel.nack(msg, false, true);
-          }
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
         } catch (error) {
           console.error("Error processing auth message:", error);
           channel.nack(msg, false, true); // Requeue on error
@@ -478,12 +457,8 @@ const startWorker = async () => {
         try {
           const data = JSON.parse(msg.content.toString());
           const eventType = msg.fields.routingKey;
-          const delivered = await sendEmail(data.email, eventType, data);
-          if (delivered) {
-            channel.ack(msg);
-          } else {
-            channel.nack(msg, false, true);
-          }
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
         } catch (error) {
           console.error("Error processing payment message:", error);
           channel.nack(msg, false, true); // Requeue on error
@@ -496,12 +471,8 @@ const startWorker = async () => {
         try {
           const data = JSON.parse(msg.content.toString());
           const eventType = msg.fields.routingKey;
-          const delivered = await sendEmail(data.email, eventType, data);
-          if (delivered) {
-            channel.ack(msg);
-          } else {
-            channel.nack(msg, false, true);
-          }
+          await sendEmail(data.email, eventType, data);
+          channel.ack(msg);
         } catch (error) {
           console.error("Error processing trial message:", error);
           channel.nack(msg, false, true); // Requeue on error
