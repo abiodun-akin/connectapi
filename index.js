@@ -31,7 +31,10 @@ const {
 } = require("./middleware/eventNotification");
 
 const Report = require("./report");
-const { validateRequest, createValidationSchema } = require("./validators/inputValidator");
+const {
+  validateRequest,
+  createValidationSchema,
+} = require("./validators/inputValidator");
 const { NotFoundError } = require("./errors/AppError");
 
 const app = express();
@@ -42,12 +45,27 @@ const normalizeOrigin = (value) => {
   const trimmed = value.trim().replace(/\/+$/, "");
   if (!trimmed) return "";
 
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return trimmed;
-  }
+  const withProtocol =
+    trimmed.startsWith("http://") || trimmed.startsWith("https://")
+      ? trimmed
+      : `https://${trimmed}`;
 
-  // Render host values are sometimes provided without protocol.
-  return `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    const isDefaultHttpPort =
+      parsed.protocol === "http:" && parsed.port === "80";
+    const isDefaultHttpsPort =
+      parsed.protocol === "https:" && parsed.port === "443";
+
+    // Treat default ports as equivalent to no explicit port.
+    if (isDefaultHttpPort || isDefaultHttpsPort) {
+      parsed.port = "";
+    }
+
+    return parsed.toString().replace(/\/+$/, "");
+  } catch (_error) {
+    return "";
+  }
 };
 
 const getAllowedOrigins = () => {
@@ -64,7 +82,7 @@ const getAllowedOrigins = () => {
     return [...new Set(configuredOrigins)];
   }
 
-  return ["http://localhost:5173"];
+  return ["http://localhost", "http://localhost:5173", "http://127.0.0.1:5173"];
 };
 
 const allowedOrigins = getAllowedOrigins();
@@ -94,7 +112,10 @@ app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
+  );
   next();
 });
 
@@ -108,7 +129,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 app.use(eventNotificationMiddleware);
@@ -118,8 +139,16 @@ app.get("/health", (req, res) => {
 });
 
 // Validation schemas for reports
-const createReportSchema = createValidationSchema("title", "location", "description");
-const updateReportSchema = createValidationSchema("title", "location", "description");
+const createReportSchema = createValidationSchema(
+  "title",
+  "location",
+  "description",
+);
+const updateReportSchema = createValidationSchema(
+  "title",
+  "location",
+  "description",
+);
 
 // Auth routes (no auth required)
 app.use("/api/auth", userRoutes);
@@ -138,7 +167,7 @@ app.use(
   "/api/matches",
   requireAuth,
   requireFeatureAccess(FEATURE_ACCESS.CORE),
-  matchesRoutes
+  matchesRoutes,
 );
 
 // Messages routes (require authentication)
@@ -146,7 +175,7 @@ app.use(
   "/api/messages",
   requireAuth,
   requireFeatureAccess(FEATURE_ACCESS.CORE),
-  messagesRoutes
+  messagesRoutes,
 );
 
 // Admin routes (require authentication and admin status)
@@ -187,7 +216,7 @@ app.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 app.get("/api/report/:id", getreport, (req, res) => {
@@ -205,7 +234,7 @@ app.put(
       const updated = await Report.findByIdAndUpdate(
         req.params.id,
         { title, location, desc },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
 
       if (!updated) {
@@ -215,7 +244,7 @@ app.put(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 app.delete("/api/report/:id", getreport, async (req, res, next) => {
@@ -248,7 +277,7 @@ const registerRealtimeHandlers = (ioInstance) => {
 
       const decoded = jwt.verify(
         token,
-        process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
+        process.env.TOKEN_SECRET || "fallback-secret-for-dev-only",
       );
       socket.userId = decoded.id;
       return next();
@@ -366,7 +395,7 @@ const registerRealtimeHandlers = (ioInstance) => {
           },
           {
             status: "read",
-          }
+          },
         );
 
         if ((result.modifiedCount || 0) > 0) {
@@ -390,8 +419,8 @@ const startServer = async () => {
     await initializeRabbitMQ();
 
     await mongoose.connect(process.env.CONN_STR, {
-        dbName: process.env.DB_NAME || undefined,
-      });
+      dbName: process.env.DB_NAME || undefined,
+    });
     console.log("MongoDB connected successfully");
 
     await ensureSuperAdmin();
