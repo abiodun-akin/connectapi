@@ -8,10 +8,6 @@ on:
 jobs:
   process-notifications:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
-    concurrency:
-      group: process-notifications
-      cancel-in-progress: true
     steps:
       - name: Trigger notification processing
         env:
@@ -20,7 +16,6 @@ jobs:
         run: |
           set -e
           curl --fail-with-body --show-error --silent \
-            --max-time 120 \
             -X POST "${API_BASE_URL}/api/cron/process-notifications" \
             -H "x-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json"

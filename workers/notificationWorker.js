@@ -11,8 +11,7 @@ const {
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
-  process.env.RESEND_FROM_EMAIL ||
-  "noreply@farmapp.kwezitechnologiesltd.africa";
+  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -400,9 +399,9 @@ const sendEmail = async (_email, eventType, data) => {
           `✗ SMS-gateway failed for ${eventType}:`,
           smsError.message,
         );
-        console.warn(
-          `⚠️ SMS failure will not block email delivery for ${eventType}`,
-        );
+        if (!preferences.offline.fallbackToEmail && !critical) {
+          return;
+        }
       }
     }
 

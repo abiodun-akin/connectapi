@@ -86,10 +86,7 @@ const getRequestBaseUrl = (req) => {
 };
 
 const getFrontendOrigin = (req) => {
-  const configuredOrigin = process.env.FRONTEND_ORIGIN?.trim().replace(
-    /\/+$/,
-    "",
-  );
+  const configuredOrigin = process.env.FRONTEND_ORIGIN?.trim().replace(/\/+$/, "");
   if (configuredOrigin) {
     return configuredOrigin;
   }

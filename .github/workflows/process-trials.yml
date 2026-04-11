@@ -8,10 +8,6 @@ on:
 jobs:
   process-trials:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: process-trials
-      cancel-in-progress: true
     steps:
       - name: Trigger trial processing
         env:
@@ -20,7 +16,6 @@ jobs:
         run: |
           set -e
           curl --fail-with-body --show-error --silent \
-            --max-time 240 \
             -X POST "${API_BASE_URL}/api/cron/process-trials" \
             -H "x-cron-secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json"

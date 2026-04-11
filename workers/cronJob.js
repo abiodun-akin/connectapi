@@ -10,8 +10,7 @@ const {
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
-  process.env.RESEND_FROM_EMAIL ||
-  "noreply@farmapp.kwezitechnologiesltd.africa";
+  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
 const isProduction = process.env.NODE_ENV === "production";
 
 const isRabbitConnectionError = (error) => {
@@ -267,10 +266,11 @@ const sendNotification = async (eventType, data = {}) => {
         console.log(
           `[Notify] SMS-gateway delivered ${eventType} to ${preferences.offline.phoneNumber}@${preferences.offline.gatewayDomain}`,
         );
-      } else {
+      } else if (!preferences.offline.fallbackToEmail && !critical) {
         console.warn(
-          `[Notify] SMS-gateway failed for ${eventType}; continuing with email delivery if enabled`,
+          `[Notify] SMS-gateway failed and email fallback disabled for ${eventType}`,
         );
+        return false;
       }
     }
 
