@@ -251,8 +251,10 @@ const sendNotification = async (eventType, data = {}) => {
       preferences.offline.gatewayDomain &&
       (!inQuietHours || critical);
 
+    let smsSent = false;
+
     if (canUseSms) {
-      const smsSent = await sendSmsGateway({
+      smsSent = await sendSmsGateway({
         phoneNumber: preferences.offline.phoneNumber,
         gatewayDomain: preferences.offline.gatewayDomain,
         body: formatSmsBody(eventType, data),
@@ -262,7 +264,6 @@ const sendNotification = async (eventType, data = {}) => {
         console.log(
           `[Notify] SMS-gateway delivered ${eventType} to ${preferences.offline.phoneNumber}@${preferences.offline.gatewayDomain}`,
         );
-        return true;
       }
 
       if (!preferences.offline.fallbackToEmail && !critical) {
@@ -274,6 +275,9 @@ const sendNotification = async (eventType, data = {}) => {
     }
 
     if (!preferences.channels.email && !critical) {
+      if (!smsSent) {
+        console.warn(`[Notify] No delivery channel available for ${eventType}`);
+      }
       console.log(
         `[Notify] Skipping ${eventType}: email channel disabled by user preferences`,
       );

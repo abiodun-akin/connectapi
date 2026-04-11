@@ -374,6 +374,8 @@ const sendEmail = async (_email, eventType, data) => {
       preferences.offline.gatewayDomain &&
       (!inQuietHours || critical);
 
+    let smsDelivered = false;
+
     if (canUseSms) {
       try {
         await sendSmsGateway({
@@ -381,8 +383,8 @@ const sendEmail = async (_email, eventType, data) => {
           gatewayDomain: preferences.offline.gatewayDomain,
           body: formatSmsBody(eventType, data),
         });
+        smsDelivered = true;
         console.log(`✓ SMS-gateway delivered for ${eventType}`);
-        return;
       } catch (smsError) {
         console.error(
           `✗ SMS-gateway failed for ${eventType}:`,
@@ -395,6 +397,9 @@ const sendEmail = async (_email, eventType, data) => {
     }
 
     if (!preferences.channels.email && !critical) {
+      if (!smsDelivered) {
+        console.warn(`⚠️ No delivery channel available for ${eventType}`);
+      }
       return;
     }
 
