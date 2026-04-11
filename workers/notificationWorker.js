@@ -102,6 +102,35 @@ const emailTemplates = {
       </div>
     `,
   },
+  "auth.password_reset_requested": {
+    subject: "Password Reset Requested - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Password Reset Request</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "there"},</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            We received a request to reset your Farm Connect password.
+          </p>
+          <div style="margin: 24px 0; text-align: center;">
+            <a href="${data.resetUrl || "#"}" style="display: inline-block; padding: 12px 18px; background: #2d8659; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
+              Reset Password
+            </a>
+          </div>
+          <p style="color: #777; font-size: 14px; line-height: 1.5;">
+            If the button does not work, copy and paste this link into your browser:
+          </p>
+          <p style="word-break: break-all; color: #2d8659; font-size: 14px;">${data.resetUrl || "N/A"}</p>
+          <p style="color: #999; font-size: 13px; margin-top: 20px;">
+            This link expires in ${data.expiresInMinutes || 30} minutes.
+          </p>
+          <p style="color: #999; font-size: 13px;">
+            If you did not request this, you can ignore this message.
+          </p>
+        </div>
+      </div>
+    `,
+  },
   "payment.initialized": {
     subject: "Payment Started - Farm Connect",
     html: (data) => `
