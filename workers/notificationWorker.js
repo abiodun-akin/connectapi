@@ -1,9 +1,25 @@
 const amqplib = require("amqplib");
 const { Resend } = require("resend");
+const mongoose = require("mongoose");
+const User = require("../user");
+const {
+  mergeNotificationPreferences,
+  resolveEventCategory,
+  isCriticalEvent,
+  isWithinQuietHours,
+} = require("../utils/notificationPreferences");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
   process.env.RESEND_FROM_EMAIL || "noreply@kwezitechnologiesltd.africa";
+
+const escapeHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 /**
  * Enhanced email templates with actual content
@@ -97,6 +113,35 @@ const emailTemplates = {
           </div>
           <p style="color: #777; font-size: 14px; line-height: 1.5;">
             This code expires in ${data.expiresInMinutes || 10} minutes. If you did not request this sign in, please reset your password.
+          </p>
+        </div>
+      </div>
+    `,
+  },
+  "auth.password_reset_requested": {
+    subject: "Password Reset Requested - Farm Connect",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Password Reset Request</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "there"},</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            We received a request to reset your Farm Connect password.
+          </p>
+          <div style="margin: 24px 0; text-align: center;">
+            <a href="${data.resetUrl || "#"}" style="display: inline-block; padding: 12px 18px; background: #2d8659; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
+              Reset Password
+            </a>
+          </div>
+          <p style="color: #777; font-size: 14px; line-height: 1.5;">
+            If the button does not work, copy and paste this link into your browser:
+          </p>
+          <p style="word-break: break-all; color: #2d8659; font-size: 14px;">${data.resetUrl || "N/A"}</p>
+          <p style="color: #999; font-size: 13px; margin-top: 20px;">
+            This link expires in ${data.expiresInMinutes || 30} minutes.
+          </p>
+          <p style="color: #999; font-size: 13px;">
+            If you did not request this, you can ignore this message.
           </p>
         </div>
       </div>
@@ -237,8 +282,68 @@ const emailTemplates = {
   },
 };
 
-const sendEmail = async (email, eventType, data) => {
+const sendEmailRaw = async (email, subject, html) => {
+  await resend.emails.send({
+    from: senderEmail,
+    to: email,
+    subject,
+    html,
+  });
+};
+
+const loadNotificationContext = async (data = {}) => {
+  let user = null;
+  if (data.userId) {
+    user = await User.findById(data.userId)
+      .select("email notificationPreferences")
+      .lean();
+  }
+
+  if (!user && data.email) {
+    user = await User.findOne({
+      email: String(data.email).trim().toLowerCase(),
+    })
+      .select("email notificationPreferences")
+      .lean();
+  }
+
+  return {
+    email: user?.email || data.email || null,
+    preferences: mergeNotificationPreferences(user?.notificationPreferences),
+  };
+};
+
+const formatSmsBody = (eventType, data = {}) => {
+  const category = resolveEventCategory(eventType);
+  const prefix =
+    category === "security"
+      ? "Security"
+      : category === "billing"
+        ? "Billing"
+        : category === "matches"
+          ? "Match"
+          : category === "messages"
+            ? "Message"
+            : "Update";
+  const text = String(data.status || data.message || eventType)
+    .replace(/\s+/g, " ")
+    .trim();
+  return `FarmConnect ${prefix}: ${text}`.slice(0, 320);
+};
+
+const sendSmsGateway = async ({ phoneNumber, gatewayDomain, body }) => {
+  const to = `${phoneNumber}@${gatewayDomain}`;
+  await sendEmailRaw(
+    to,
+    "FarmConnect Alert",
+    `<div style="font-family: Arial, sans-serif; white-space: pre-wrap;">${escapeHtml(body)}</div>`,
+  );
+};
+
+const sendEmail = async (_email, eventType, data) => {
   try {
+    const { email, preferences } = await loadNotificationContext(data);
+
     if (!email) {
       console.warn(`Skipping ${eventType}: missing recipient email`);
       return;
@@ -253,12 +358,47 @@ const sendEmail = async (email, eventType, data) => {
     const htmlContent =
       typeof template.html === "function" ? template.html(data) : template.html;
 
-    await resend.emails.send({
-      from: senderEmail,
-      to: email,
-      subject: template.subject,
-      html: htmlContent,
-    });
+    const critical = isCriticalEvent(eventType);
+    const eventCategory = resolveEventCategory(eventType);
+    const allowsCategory = Boolean(preferences.eventTypes[eventCategory]);
+    const inQuietHours = isWithinQuietHours(preferences.quietHours);
+
+    if (!critical && !allowsCategory) {
+      return;
+    }
+
+    const canUseSms =
+      preferences.channels.sms &&
+      preferences.offline.subscribed &&
+      preferences.offline.phoneNumber &&
+      preferences.offline.gatewayDomain &&
+      (!inQuietHours || critical);
+
+    if (canUseSms) {
+      try {
+        await sendSmsGateway({
+          phoneNumber: preferences.offline.phoneNumber,
+          gatewayDomain: preferences.offline.gatewayDomain,
+          body: formatSmsBody(eventType, data),
+        });
+        console.log(`✓ SMS-gateway delivered for ${eventType}`);
+        return;
+      } catch (smsError) {
+        console.error(
+          `✗ SMS-gateway failed for ${eventType}:`,
+          smsError.message,
+        );
+        if (!preferences.offline.fallbackToEmail && !critical) {
+          return;
+        }
+      }
+    }
+
+    if (!preferences.channels.email && !critical) {
+      return;
+    }
+
+    await sendEmailRaw(email, template.subject, htmlContent);
 
     console.log(`✓ Email sent for ${eventType} to ${email}`);
   } catch (error) {
@@ -268,6 +408,10 @@ const sendEmail = async (email, eventType, data) => {
 
 const startWorker = async () => {
   try {
+    await mongoose.connect(process.env.CONN_STR || "", {
+      serverSelectionTimeoutMS: 10000,
+    });
+
     const connection = await amqplib.connect(process.env.RABBITMQ_URL);
     const channel = await connection.createChannel();
 
