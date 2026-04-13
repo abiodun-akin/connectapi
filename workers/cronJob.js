@@ -2,7 +2,8 @@ const amqplib = require("amqplib");
 const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const senderEmail = process.env.RESEND_FROM_EMAIL || "noreply@farmconnect.com";
+const senderEmail =
+  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
 const isProduction = process.env.NODE_ENV === "production";
 
 const isRabbitConnectionError = (error) => {

@@ -3,7 +3,7 @@ const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const senderEmail =
-  process.env.RESEND_FROM_EMAIL || "noreply@kwezitechnologiesltd.africa";
+  process.env.RESEND_FROM_EMAIL || "noreply@farmapp.kwezitechnologiesltd.africa";
 
 /**
  * Enhanced email templates with actual content
