@@ -12,6 +12,7 @@ const paymentRoutes = require("./routes/payment");
 const profileRoutes = require("./routes/profile");
 const matchesRoutes = require("./routes/matches");
 const messagesRoutes = require("./routes/messages");
+const notificationPreferencesRoutes = require("./routes/notificationPreferences");
 const adminRoutes = require("./routes/admin");
 const adminAgentsRoutes = require("./routes/adminAgents");
 const adminPaymentRoutes = require("./routes/adminPayment");
@@ -29,6 +30,9 @@ const {
   initializeRabbitMQ,
   eventNotificationMiddleware,
 } = require("./middleware/eventNotification");
+const {
+  emailVerificationRequired,
+} = require("./middleware/emailVerificationRequired");
 
 const Report = require("./report");
 const {
@@ -156,35 +160,55 @@ app.use("/api/auth", userRoutes);
 // Cron routes (Protected by secret)
 app.use("/api/cron", cronRoutes);
 
-// Payment routes (require authentication)
-app.use("/api/payment", requireAuth, paymentRoutes);
+// Payment routes (require authentication + email verification)
+app.use("/api/payment", requireAuth, emailVerificationRequired, paymentRoutes);
 
-// Profile routes (require authentication)
-app.use("/api/profile", requireAuth, profileRoutes);
+// Notification Preferences routes (require authentication + email verification)
+app.use(
+  "/api/notification-preferences",
+  requireAuth,
+  emailVerificationRequired,
+  notificationPreferencesRoutes,
+);
 
-// Matches routes (require authentication)
+// Profile routes (require authentication + email verification)
+app.use("/api/profile", requireAuth, emailVerificationRequired, profileRoutes);
+
+// Matches routes (require authentication + email verification + feature access)
 app.use(
   "/api/matches",
   requireAuth,
+  emailVerificationRequired,
   requireFeatureAccess(FEATURE_ACCESS.CORE),
   matchesRoutes,
 );
 
-// Messages routes (require authentication)
+// Messages routes (require authentication + email verification + feature access)
 app.use(
   "/api/messages",
   requireAuth,
+  emailVerificationRequired,
   requireFeatureAccess(FEATURE_ACCESS.CORE),
   messagesRoutes,
 );
 
-// Admin routes (require authentication and admin status)
-app.use("/api/admin", requireAuth, adminRoutes);
-app.use("/api/admin", requireAuth, adminPaymentRoutes);
-app.use("/api/admin/agents", requireAuth, adminAgentsRoutes);
+// Admin routes (require authentication + email verification + admin status)
+app.use("/api/admin", requireAuth, emailVerificationRequired, adminRoutes);
+app.use(
+  "/api/admin",
+  requireAuth,
+  emailVerificationRequired,
+  adminPaymentRoutes,
+);
+app.use(
+  "/api/admin/agents",
+  requireAuth,
+  emailVerificationRequired,
+  adminAgentsRoutes,
+);
 
-// Agent routes (require authentication)
-app.use("/api/agents", requireAuth, agentsRoutes);
+// Agent routes (require authentication + email verification)
+app.use("/api/agents", requireAuth, emailVerificationRequired, agentsRoutes);
 
 // Report routes (require authentication)
 app.use(requireAuth);
