@@ -99,6 +99,26 @@ const emailTemplates = {
     html: (data) =>
       `<h1>Verify Your Email</h1><p>Thanks for signing up! Please verify your Farm Connect email address by clicking the button below.</p><p><a href="${escapeHtml(data.verifyUrl)}" style="display:inline-block;padding:10px 16px;background:#14532d;color:#fff;text-decoration:none;border-radius:6px;">Verify Email</a></p><p>This link expires in ${escapeHtml(String(data.expiresInHours || 24))} hours.</p><p>If you did not create an account on Farm Connect, you can safely ignore this email.</p>`,
   },
+  "auth.two_factor_requested": {
+    subject: "Your Farm Connect 2FA Code",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Two-Factor Authentication</h1>
+          <p style="color: #555; font-size: 16px;">Hi ${data.name || "there"},</p>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            Use the code below to complete your sign in:
+          </p>
+          <div style="margin: 22px 0; text-align: center;">
+            <span style="display: inline-block; letter-spacing: 6px; font-size: 32px; font-weight: 700; color: #193325; background: #eef6f2; border-radius: 8px; padding: 10px 16px;">${data.code || "------"}</span>
+          </div>
+          <p style="color: #777; font-size: 14px; line-height: 1.5;">
+            This code expires in ${data.expiresInMinutes || 10} minutes. If you did not request this sign in, please reset your password.
+          </p>
+        </div>
+      </div>
+    `,
+  },
   "payment.initialized": {
     subject: "Payment Started",
     html: "<h1>Payment Started</h1><p>Your payment process has started.</p>",
