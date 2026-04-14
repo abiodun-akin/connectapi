@@ -7,6 +7,7 @@
     "dev": "nodemon index.js",
     "start": "node index.js",
     "worker": "node workers/notificationWorker.js",
+    "sms-worker": "node workers/smsNotificationWorker.js",
     "cron": "node workers/cronJob.js",
     "trial:process": "node workers/trialProcessorJob.js",
     "seed:demo-matches": "node scripts/seedDemoMatches.js",

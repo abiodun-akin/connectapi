@@ -1,0 +1,16 @@
+services:
+  - type: background_worker
+    name: sms-notification-worker
+    env: node
+    buildCommand: npm install
+    startCommand: npm run sms-worker
+    envVars:
+      - key: RABBITMQ_URL
+        sync: false
+      - key: BEEM_API_KEY
+        sync: false
+      - key: BEEM_SECRET_KEY
+        sync: false
+      - key: BEEM_FROM_NAME
+        value: FarmConnect
+        sync: false
