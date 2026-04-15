@@ -163,11 +163,11 @@ app.use("/api/cron", cronRoutes);
 // Payment routes (require authentication + email verification)
 app.use("/api/payment", requireAuth, emailVerificationRequired, paymentRoutes);
 
-// Notification Preferences routes (require authentication + email verification)
+// Notification Preferences routes (require authentication only - email verification not required)
+// Users should be able to configure notifications regardless of email verification status
 app.use(
   "/api/notification-preferences",
   requireAuth,
-  emailVerificationRequired,
   notificationPreferencesRoutes,
 );
 
