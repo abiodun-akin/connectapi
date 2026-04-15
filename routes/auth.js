@@ -64,10 +64,11 @@ const signAuthToken = (userId) =>
   });
 
 const setAuthCookie = (res, token) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.cookie("jwt", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    secure: isProduction, // Required when sameSite is "none"
+    sameSite: isProduction ? "none" : "lax",
     maxAge: 24 * 60 * 60 * 1000,
   });
 };
