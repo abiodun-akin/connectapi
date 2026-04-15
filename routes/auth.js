@@ -83,14 +83,14 @@ const getRequestBaseUrl = (req) => {
 const getFrontendOrigin = () => {
   // Always use environment variable - no hardcoded URLs
   let origin = process.env.FRONTEND_ORIGIN;
-  
+
   if (!origin) {
     throw new Error(
       "FRONTEND_ORIGIN environment variable is not set. " +
-      "Set it to your frontend URL (e.g., https://farmapp.kwezitechnologiesltd.africa or http://localhost:80)"
+        "Set it to your frontend URL (e.g., https://farmapp.kwezitechnologiesltd.africa or http://localhost:80)",
     );
   }
-  
+
   return origin.trim().replace(/\/+$/, "");
 };
 
@@ -569,8 +569,25 @@ router.post(
         token,
       });
     } catch (error) {
+      console.error("[SIGNUP ERROR] Caught error:", {
+        code: error.code,
+        message: error.message,
+        field: error.keyPattern ? Object.keys(error.keyPattern)[0] : null,
+        keyPattern: error.keyPattern,
+        keyValue: error.keyValue,
+        name: error.name,
+      });
+
       if (error.code === 11000) {
-        return next(new ConflictError("Email already registered"));
+        const field = error.keyPattern
+          ? Object.keys(error.keyPattern)[0]
+          : "email";
+        const dupError = new ConflictError(`${field} already registered`);
+        console.error(
+          "[SIGNUP ERROR] Returning conflict error:",
+          dupError.message,
+        );
+        return next(dupError);
       }
       next(error);
     }
@@ -675,8 +692,10 @@ router.post("/2fa/verify", async (req, res, next) => {
     }
 
     // Check if code is a recovery code (8-char hex uppercase)
-    const isRecoveryCode = /^[A-F0-9]{8}$/.test(String(code).trim().toUpperCase());
-    
+    const isRecoveryCode = /^[A-F0-9]{8}$/.test(
+      String(code).trim().toUpperCase(),
+    );
+
     if (isRecoveryCode) {
       // Validate recovery code
       const codeToCheck = String(code).trim().toUpperCase();
@@ -697,7 +716,10 @@ router.post("/2fa/verify", async (req, res, next) => {
 
       // Fall back to email code verification if TOTP failed or not set up
       if (!isValid && user.twoFactorCodeHash && user.twoFactorCodeExpiresAt) {
-        if (new Date(user.twoFactorCodeExpiresAt) > new Date() && hashToken(codeStr) === user.twoFactorCodeHash) {
+        if (
+          new Date(user.twoFactorCodeExpiresAt) > new Date() &&
+          hashToken(codeStr) === user.twoFactorCodeHash
+        ) {
           isValid = true;
         } else if (new Date(user.twoFactorCodeExpiresAt) <= new Date()) {
           user.twoFactorCodeHash = null;
@@ -712,7 +734,9 @@ router.post("/2fa/verify", async (req, res, next) => {
             user.twoFactorCodeExpiresAt = null;
             user.twoFactorAttemptCount = 0;
             await user.save();
-            throw new AuthorizationError("Too many invalid attempts. Please login again.");
+            throw new AuthorizationError(
+              "Too many invalid attempts. Please login again.",
+            );
           }
           user.twoFactorAttemptCount = (user.twoFactorAttemptCount || 0) + 1;
           await user.save();
@@ -724,7 +748,10 @@ router.post("/2fa/verify", async (req, res, next) => {
         throw new AuthenticationError("Invalid two-factor code");
       }
     } else {
-      throw new ValidationError("A valid 6-digit code or recovery code is required", "code");
+      throw new ValidationError(
+        "A valid 6-digit code or recovery code is required",
+        "code",
+      );
     }
 
     user.twoFactorCodeHash = null;
@@ -762,17 +789,18 @@ router.post("/2fa/enable", async (req, res, next) => {
     user.twoFactorCodeHash = null;
     user.twoFactorCodeExpiresAt = null;
     user.twoFactorAttemptCount = 0;
-    
+
     // Generate recovery codes
     const plainCodes = User.generateRecoveryCodes();
     user.setRecoveryCodes(plainCodes);
-    
+
     await user.save();
 
     res.json({
       message: "Two-factor authentication enabled",
       recoveryCodes: plainCodes,
-      status: "Store these codes in a safe place. Each code can be used once if you lose access to your authenticator app.",
+      status:
+        "Store these codes in a safe place. Each code can be used once if you lose access to your authenticator app.",
     });
   } catch (error) {
     next(error);
@@ -820,14 +848,14 @@ router.get("/2fa/recovery-codes", async (req, res, next) => {
 router.post("/2fa/recovery-codes/regenerate", async (req, res, next) => {
   try {
     const { user } = await resolveAuthenticatedSession(req);
-    
+
     if (!user.twoFactorEnabled) {
       throw new ValidationError(
         "Two-factor authentication is not enabled",
-        "twoFactor"
+        "twoFactor",
       );
     }
-    
+
     const plainCodes = User.generateRecoveryCodes();
     user.setRecoveryCodes(plainCodes);
     await user.save();
@@ -848,11 +876,11 @@ router.post("/2fa/recovery-codes/regenerate", async (req, res, next) => {
 router.post("/2fa/recovery-codes/send-email", async (req, res, next) => {
   try {
     const { user } = await resolveAuthenticatedSession(req);
-    
+
     if (!user.twoFactorEnabled) {
       throw new ValidationError(
         "Two-factor authentication is not enabled",
-        "twoFactor"
+        "twoFactor",
       );
     }
 
@@ -860,7 +888,7 @@ router.post("/2fa/recovery-codes/send-email", async (req, res, next) => {
     if (!status || status.total === 0) {
       throw new ValidationError(
         "No recovery codes available to send",
-        "recoveryCodes"
+        "recoveryCodes",
       );
     }
 
@@ -902,8 +930,10 @@ router.post("/2fa/setup", async (req, res, next) => {
       qrCode: setupResponse.qrCode,
       secret: setupResponse.secret,
       manualEntryKey: setupResponse.manualEntryKey,
-      instructions: "Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)",
-      backupSecret: "If you can't scan the QR code, enter this key manually in your app",
+      instructions:
+        "Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)",
+      backupSecret:
+        "If you can't scan the QR code, enter this key manually in your app",
     });
   } catch (error) {
     next(error);
@@ -920,11 +950,17 @@ router.post("/2fa/setup/verify", async (req, res, next) => {
     const { totpCode } = req.body || {};
 
     if (!totpCode || !/^\d{6}$/.test(String(totpCode))) {
-      throw new ValidationError("Valid 6-digit TOTP code is required", "totpCode");
+      throw new ValidationError(
+        "Valid 6-digit TOTP code is required",
+        "totpCode",
+      );
     }
 
     if (!user.twoFactorSecret) {
-      throw new ValidationError("TOTP setup has not been initiated", "twoFactor");
+      throw new ValidationError(
+        "TOTP setup has not been initiated",
+        "twoFactor",
+      );
     }
 
     // Verify TOTP code
@@ -943,7 +979,8 @@ router.post("/2fa/setup/verify", async (req, res, next) => {
       message: "Two-factor authentication enabled successfully",
       recoveryCodes: plainCodes,
       method: "authenticator",
-      status: "Store these recovery codes in a safe place. You'll need them if you lose access to your authenticator app.",
+      status:
+        "Store these recovery codes in a safe place. You'll need them if you lose access to your authenticator app.",
     });
   } catch (error) {
     next(error);
@@ -960,15 +997,24 @@ router.put("/2fa/method", async (req, res, next) => {
     const { method } = req.body || {};
 
     if (!["email", "authenticator"].includes(method)) {
-      throw new ValidationError("Method must be 'email' or 'authenticator'", "method");
+      throw new ValidationError(
+        "Method must be 'email' or 'authenticator'",
+        "method",
+      );
     }
 
     if (!user.twoFactorEnabled) {
-      throw new ValidationError("Two-factor authentication is not enabled", "twoFactor");
+      throw new ValidationError(
+        "Two-factor authentication is not enabled",
+        "twoFactor",
+      );
     }
 
     if (method === "authenticator" && !user.twoFactorSecret) {
-      throw new ValidationError("Authenticator app is not set up yet", "method");
+      throw new ValidationError(
+        "Authenticator app is not set up yet",
+        "method",
+      );
     }
 
     user.twoFactorMethod = method;
@@ -1324,13 +1370,49 @@ router.post(
       user.emailVerificationExpiresAt = null;
       await user.save();
 
+      const authUser = await serializeAuthUser(user);
+      const newToken = signAuthToken(user._id);
+
       res.json({
-        message: "Email verified successfully. You can now sign in.",
+        message:
+          "Email verified successfully. You can now access all features.",
+        user: authUser,
+        token: newToken,
       });
     } catch (error) {
       next(error);
     }
   },
 );
+
+// Development-only endpoint for testing email verification flow
+if (process.env.NODE_ENV !== "production") {
+  router.get("/dev/verification-token/:email", async (req, res, next) => {
+    try {
+      const email = String(req.params.email).trim().toLowerCase();
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+          email,
+        });
+      }
+
+      const verifyToken = user.createEmailVerificationToken();
+      await user.save();
+
+      res.json({
+        message: "Verification token generated for testing",
+        email: user.email,
+        isEmailVerified: user.isEmailVerified,
+        verificationToken: verifyToken,
+        note: "Use this token with POST /api/auth/verify-email",
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+}
 
 module.exports = router;

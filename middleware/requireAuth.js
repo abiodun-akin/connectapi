@@ -1,6 +1,9 @@
 const jwt = require("jsonwebtoken");
 const User = require("../user");
-const { AuthenticationError, AuthorizationError } = require("../errors/AppError");
+const {
+  AuthenticationError,
+  AuthorizationError,
+} = require("../errors/AppError");
 
 const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -17,13 +20,15 @@ const requireAuth = async (req, res, next) => {
   try {
     decodedToken = jwt.verify(
       token,
-      process.env.TOKEN_SECRET || "fallback-secret-for-dev-only"
+      process.env.TOKEN_SECRET || "fallback-secret-for-dev-only",
     );
   } catch (err) {
     console.log("JWT verification error:", err.message);
 
     if (err.name === "TokenExpiredError") {
-      return next(new AuthorizationError("Token has expired. Please login again."));
+      return next(
+        new AuthorizationError("Token has expired. Please login again."),
+      );
     }
 
     return next(new AuthenticationError("Invalid authentication token"));
@@ -31,7 +36,7 @@ const requireAuth = async (req, res, next) => {
 
   try {
     const user = await User.findById(decodedToken.id).select(
-      "email isAdmin isSuspended suspensionReason"
+      "email isAdmin isSuspended suspensionReason isEmailVerified",
     );
 
     if (!user) {

@@ -16,6 +16,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Email is required"],
       unique: true,
+      sparse: true,
       trim: true,
       lowercase: true,
       escape: true,
@@ -31,14 +32,12 @@ const userSchema = new mongoose.Schema(
     },
     googleId: {
       type: String,
-      default: null,
       unique: true,
       sparse: true,
       index: true,
     },
     microsoftId: {
       type: String,
-      default: null,
       unique: true,
       sparse: true,
       index: true,
@@ -271,38 +270,37 @@ userSchema.methods.createEmailVerificationToken = function () {
   return rawToken;
 };
 
-
 // Static methods for 2FA recovery codes
-userSchema.statics.generateRecoveryCodes = function() {
+userSchema.statics.generateRecoveryCodes = function () {
   const codes = [];
   for (let i = 0; i < 10; i++) {
     // Generate 8-character alphanumeric codes
-    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
     codes.push(code);
   }
   return codes;
 };
 
-userSchema.statics.hashRecoveryCode = function(code) {
-  return crypto.createHash('sha256').update(code).digest('hex');
+userSchema.statics.hashRecoveryCode = function (code) {
+  return crypto.createHash("sha256").update(code).digest("hex");
 };
 
-userSchema.methods.setRecoveryCodes = function(plainCodes) {
+userSchema.methods.setRecoveryCodes = function (plainCodes) {
   // Hash and store recovery codes
-  this.twoFactorRecoveryCodes = plainCodes.map(code => ({
-    codeHash: crypto.createHash('sha256').update(code).digest('hex'),
+  this.twoFactorRecoveryCodes = plainCodes.map((code) => ({
+    codeHash: crypto.createHash("sha256").update(code).digest("hex"),
     used: false,
   }));
   this.twoFactorRecoveryCodesGeneratedAt = new Date();
   return this.twoFactorRecoveryCodes.map((_, i) => plainCodes[i]);
 };
 
-userSchema.methods.validateRecoveryCode = function(plainCode) {
-  const codeHash = crypto.createHash('sha256').update(plainCode).digest('hex');
+userSchema.methods.validateRecoveryCode = function (plainCode) {
+  const codeHash = crypto.createHash("sha256").update(plainCode).digest("hex");
   const recoveryCode = this.twoFactorRecoveryCodes.find(
-    rc => rc.codeHash === codeHash && !rc.used
+    (rc) => rc.codeHash === codeHash && !rc.used,
   );
-  
+
   if (recoveryCode) {
     recoveryCode.used = true;
     recoveryCode.usedAt = new Date();
@@ -311,11 +309,11 @@ userSchema.methods.validateRecoveryCode = function(plainCode) {
   return false;
 };
 
-userSchema.methods.getRecoveryCodeStatus = function() {
+userSchema.methods.getRecoveryCodeStatus = function () {
   if (!this.twoFactorRecoveryCodes) {
     return { total: 0, remaining: 0 };
   }
-  const used = this.twoFactorRecoveryCodes.filter(rc => rc.used).length;
+  const used = this.twoFactorRecoveryCodes.filter((rc) => rc.used).length;
   const total = this.twoFactorRecoveryCodes.length;
   return {
     total,
@@ -325,25 +323,25 @@ userSchema.methods.getRecoveryCodeStatus = function() {
 };
 
 // TOTP (Authenticator App) Methods
-userSchema.methods.generateTOTPSecret = function() {
-  const speakeasy = require('speakeasy');
+userSchema.methods.generateTOTPSecret = function () {
+  const speakeasy = require("speakeasy");
   const secret = speakeasy.generateSecret({
     name: `FarmConnect (${this.email})`,
-    issuer: 'FarmConnect',
+    issuer: "FarmConnect",
     length: 32,
   });
   this.twoFactorSecret = secret.base32;
   return secret;
 };
 
-userSchema.methods.verifyTOTPCode = function(token) {
+userSchema.methods.verifyTOTPCode = function (token) {
   if (!this.twoFactorSecret) {
     return false;
   }
-  const speakeasy = require('speakeasy');
+  const speakeasy = require("speakeasy");
   return speakeasy.totp.verify({
     secret: this.twoFactorSecret,
-    encoding: 'base32',
+    encoding: "base32",
     token,
     window: 2, // Allow for time drift (±2 time steps)
   });

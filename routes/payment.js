@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const { publishEvent } = require("../middleware/eventNotification");
 const {
+  emailVerificationRequired,
+} = require("../middleware/emailVerificationRequired");
+const {
   validateRequest,
   validationRules,
 } = require("../validators/inputValidator");
@@ -43,9 +46,11 @@ const SINGLE_PAID_PLAN = "premium";
 /**
  * POST /api/payment/initialize
  * Create a payment record and initialize payment
+ * Requires email verification
  */
 router.post(
   "/initialize",
+  emailVerificationRequired,
   validateRequest(initializePaymentSchema),
   async (req, res, next) => {
     const { plan, amount, email } = req.body;
@@ -119,9 +124,11 @@ router.post(
 /**
  * POST /api/payment/verify
  * Verify payment with Paystack and update payment status
+ * Requires email verification
  */
 router.post(
   "/verify",
+  emailVerificationRequired,
   validateRequest(verifyPaymentSchema),
   async (req, res, next) => {
     const { reference, plan } = req.body;
@@ -221,9 +228,11 @@ router.post(
 /**
  * POST /api/payment/success
  * Finalize payment and create/update subscription
+ * Requires email verification
  */
 router.post(
   "/success",
+  emailVerificationRequired,
   validateRequest(successPaymentSchema),
   async (req, res, next) => {
     const { reference, plan } = req.body;
@@ -318,8 +327,9 @@ router.post(
 /**
  * POST /api/payment/close
  * Cancel subscription
+ * Requires email verification
  */
-router.post("/close", async (req, res, next) => {
+router.post("/close", emailVerificationRequired, async (req, res, next) => {
   try {
     // Cancel user's active subscription
     const subscription = await Subscription.findOne({
@@ -352,44 +362,50 @@ router.post("/close", async (req, res, next) => {
 /**
  * POST /api/payment/cancel-renewal
  * Turn off auto-renewal while keeping current period active
+ * Requires email verification
  */
-router.post("/cancel-renewal", async (req, res, next) => {
-  try {
-    const subscription = await Subscription.findOneAndUpdate(
-      {
-        user_id: req.user._id,
-        status: { $in: ["active", "trial"] },
-        endDate: { $gt: new Date() },
-      },
-      { autoRenewal: false },
-      { new: true },
-    );
+router.post(
+  "/cancel-renewal",
+  emailVerificationRequired,
+  async (req, res, next) => {
+    try {
+      const subscription = await Subscription.findOneAndUpdate(
+        {
+          user_id: req.user._id,
+          status: { $in: ["active", "trial"] },
+          endDate: { $gt: new Date() },
+        },
+        { autoRenewal: false },
+        { new: true },
+      );
 
-    if (!subscription) {
-      throw new NotFoundError("Active subscription");
+      if (!subscription) {
+        throw new NotFoundError("Active subscription");
+      }
+
+      publishEvent("payment_events", "payment.renewal.cancelled", {
+        userId: req.user._id,
+        subscriptionId: subscription._id,
+        timestamp: new Date(),
+      });
+
+      res.json({
+        message:
+          "Auto-renewal cancelled. Your subscription remains active until end date.",
+        subscription,
+      });
+    } catch (error) {
+      next(error);
     }
-
-    publishEvent("payment_events", "payment.renewal.cancelled", {
-      userId: req.user._id,
-      subscriptionId: subscription._id,
-      timestamp: new Date(),
-    });
-
-    res.json({
-      message:
-        "Auto-renewal cancelled. Your subscription remains active until end date.",
-      subscription,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+  },
+);
 
 /**
  * POST /api/payment/downgrade
  * Schedule a downgrade to free access at subscription renewal date.
+ * Requires email verification
  */
-router.post("/downgrade", async (req, res, next) => {
+router.post("/downgrade", emailVerificationRequired, async (req, res, next) => {
   try {
     const activeSubscription = await Subscription.getUserActiveSubscription(
       req.user._id,
@@ -442,6 +458,7 @@ router.post("/downgrade", async (req, res, next) => {
 /**
  * GET /api/payment/invoices
  * Fetch user invoice records.
+ * NOTE: Read operation - accessible to all authenticated users (no email verification required)
  */
 router.get("/invoices", async (req, res, next) => {
   try {

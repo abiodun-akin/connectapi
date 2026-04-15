@@ -160,8 +160,9 @@ app.use("/api/auth", userRoutes);
 // Cron routes (Protected by secret)
 app.use("/api/cron", cronRoutes);
 
-// Payment routes (require authentication + email verification)
-app.use("/api/payment", requireAuth, emailVerificationRequired, paymentRoutes);
+// Payment routes (require authentication only - subscription endpoint accessible to unverified users)
+// Individual payment action endpoints are protected within the routes file
+app.use("/api/payment", requireAuth, paymentRoutes);
 
 // Notification Preferences routes (require authentication only - email verification not required)
 // Users should be able to configure notifications regardless of email verification status
@@ -171,8 +172,10 @@ app.use(
   notificationPreferencesRoutes,
 );
 
-// Profile routes (require authentication + email verification)
-app.use("/api/profile", requireAuth, emailVerificationRequired, profileRoutes);
+// Profile routes (require authentication)
+// Email verification required for profile creation and updates (POST/PUT)
+// Profile reads (GET) allowed for all authenticated users
+app.use("/api/profile", requireAuth, profileRoutes);
 
 // Matches routes (require authentication + email verification + feature access)
 app.use(
@@ -207,8 +210,10 @@ app.use(
   adminAgentsRoutes,
 );
 
-// Agent routes (require authentication + email verification)
-app.use("/api/agents", requireAuth, emailVerificationRequired, agentsRoutes);
+// Agent routes (require authentication only)
+// Email verification required only for write operations (POST/DELETE)
+// Agent status checks allowed during onboarding before verification
+app.use("/api/agents", requireAuth, agentsRoutes);
 
 // Report routes (require authentication)
 app.use(requireAuth);

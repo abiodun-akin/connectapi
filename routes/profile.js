@@ -1,5 +1,8 @@
 const express = require("express");
 const router = express.Router();
+const {
+  emailVerificationRequired,
+} = require("../middleware/emailVerificationRequired");
 const UserProfile = require("../userProfile");
 const Subscription = require("../subscription");
 const { AFRICAN_COUNTRY_SET } = require("../utils/africanCountries");
@@ -7,60 +10,64 @@ const { ValidationError, NotFoundError } = require("../errors/AppError");
 
 /**
  * POST /api/profile/initialize
- * Initialize user profile (choose farmer or vendor)
+ * Initialize user profile (choose farmer or vendor) - requires email verification
  */
-router.post("/initialize", async (req, res, next) => {
-  const { profileType } = req.body;
+router.post(
+  "/initialize",
+  emailVerificationRequired,
+  async (req, res, next) => {
+    const { profileType } = req.body;
 
-  try {
-    if (!["farmer", "vendor"].includes(profileType)) {
-      throw new ValidationError(
-        "Profile type must be farmer or vendor",
-        "profileType",
-      );
-    }
+    try {
+      if (!["farmer", "vendor"].includes(profileType)) {
+        throw new ValidationError(
+          "Profile type must be farmer or vendor",
+          "profileType",
+        );
+      }
 
-    const existingProfile = await UserProfile.getUserProfile(req.user._id);
+      const existingProfile = await UserProfile.getUserProfile(req.user._id);
 
-    // If profile is already complete, don't allow re-initialization
-    if (existingProfile && existingProfile.isProfileComplete) {
-      return res.status(400).json({
-        error: "Profile already completed",
-        code: "PROFILE_ALREADY_COMPLETE",
+      // If profile is already complete, don't allow re-initialization
+      if (existingProfile && existingProfile.isProfileComplete) {
+        return res.status(400).json({
+          error: "Profile already completed",
+          code: "PROFILE_ALREADY_COMPLETE",
+        });
+      }
+
+      let profile;
+
+      // If profile exists but incomplete, update it
+      if (existingProfile) {
+        profile = await UserProfile.findOneAndUpdate(
+          { user_id: req.user._id },
+          { profileType },
+          { new: true },
+        );
+      } else {
+        // Create new profile
+        profile = await UserProfile.create({
+          user_id: req.user._id,
+          profileType,
+        });
+      }
+
+      res.json({
+        message: "Profile type selected",
+        profile,
       });
+    } catch (error) {
+      next(error);
     }
-
-    let profile;
-
-    // If profile exists but incomplete, update it
-    if (existingProfile) {
-      profile = await UserProfile.findOneAndUpdate(
-        { user_id: req.user._id },
-        { profileType },
-        { new: true },
-      );
-    } else {
-      // Create new profile
-      profile = await UserProfile.create({
-        user_id: req.user._id,
-        profileType,
-      });
-    }
-
-    res.json({
-      message: "Profile type selected",
-      profile,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+  },
+);
 
 /**
  * POST /api/profile/farmer
- * Complete farmer profile
+ * Complete farmer profile - requires email verification
  */
-router.post("/farmer", async (req, res, next) => {
+router.post("/farmer", emailVerificationRequired, async (req, res, next) => {
   const farmerData = req.body;
 
   try {
@@ -127,9 +134,9 @@ router.post("/farmer", async (req, res, next) => {
 
 /**
  * POST /api/profile/vendor
- * Complete vendor profile
+ * Complete vendor profile - requires email verification
  */
-router.post("/vendor", async (req, res, next) => {
+router.post("/vendor", emailVerificationRequired, async (req, res, next) => {
   const vendorData = req.body;
 
   try {
@@ -267,9 +274,9 @@ router.get("/:userId", async (req, res, next) => {
 
 /**
  * PUT /api/profile
- * Update user profile
+ * Update user profile (requires email verification)
  */
-router.put("/", async (req, res, next) => {
+router.put("/", emailVerificationRequired, async (req, res, next) => {
   try {
     const profile = await UserProfile.findOneAndUpdate(
       { user_id: req.user._id },

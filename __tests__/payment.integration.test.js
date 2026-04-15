@@ -52,7 +52,11 @@ describe("Payment Routes Integration", () => {
     app = express();
     app.use(express.json());
     app.use((req, res, next) => {
-      req.user = { _id: "user-123", email: "user@example.com" };
+      req.user = {
+        _id: "user-123",
+        email: "user@example.com",
+        isEmailVerified: true,
+      };
       next();
     });
     app.use("/api/payment", paymentRoutes);
