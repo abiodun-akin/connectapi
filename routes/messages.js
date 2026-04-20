@@ -24,7 +24,10 @@ router.post("/send", async (req, res, next) => {
     }
 
     if (normalizedContent.length > 5000) {
-      throw new ValidationError("Content must be between 1 and 5000 characters", "content");
+      throw new ValidationError(
+        "Content must be between 1 and 5000 characters",
+        "content",
+      );
     }
 
     const match = await Match.findById(match_id);
@@ -34,8 +37,10 @@ router.post("/send", async (req, res, next) => {
     }
 
     // Verify user is part of this match
-    if (match.farmer_id.toString() !== req.user._id.toString() &&
-        match.vendor_id.toString() !== req.user._id.toString()) {
+    if (
+      match.farmer_id.toString() !== req.user._id.toString() &&
+      match.vendor_id.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         error: "Not authorized to send messages in this match",
         code: "UNAUTHORIZED",
@@ -64,6 +69,15 @@ router.post("/send", async (req, res, next) => {
       attachment,
     });
 
+    // Update match status to 'connected' if currently 'interested' (first message flow)
+    if (match.status === "interested") {
+      await Match.findByIdAndUpdate(
+        match_id,
+        { status: "connected" },
+        { new: true },
+      );
+    }
+
     res.status(201).json({
       message: "Message sent successfully",
       data: message,
@@ -86,8 +100,14 @@ router.get("/conversations", async (req, res, next) => {
     // Get unique matches where user is involved
     const matches = await Match.find({
       $or: [
-        { farmer_id: req.user._id, status: { $in: ["interested", "connected"] } },
-        { vendor_id: req.user._id, status: { $in: ["interested", "connected"] } },
+        {
+          farmer_id: req.user._id,
+          status: { $in: ["interested", "connected"] },
+        },
+        {
+          vendor_id: req.user._id,
+          status: { $in: ["interested", "connected"] },
+        },
       ],
     })
       .populate({
@@ -114,26 +134,35 @@ router.get("/conversations", async (req, res, next) => {
         return {
           match_id: match._id,
           otherUser: otherUserId,
-          otherUserEmail: match.farmer_id._id.toString() === req.user._id.toString()
-            ? match.vendor_id.email
-            : match.farmer_id.email,
+          otherUserEmail:
+            match.farmer_id._id.toString() === req.user._id.toString()
+              ? match.vendor_id.email
+              : match.farmer_id.email,
           lastMessage: latestMessage?.content || null,
           lastMessageAt: latestMessage?.createdAt || null,
           status: match.status,
           matchScore: match.matchScore,
         };
-      })
+      }),
     );
 
     const total = await Match.countDocuments({
       $or: [
-        { farmer_id: req.user._id, status: { $in: ["interested", "connected"] } },
-        { vendor_id: req.user._id, status: { $in: ["interested", "connected"] } },
+        {
+          farmer_id: req.user._id,
+          status: { $in: ["interested", "connected"] },
+        },
+        {
+          vendor_id: req.user._id,
+          status: { $in: ["interested", "connected"] },
+        },
       ],
     });
 
     res.json({
-      conversations: conversations.sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt)),
+      conversations: conversations.sort(
+        (a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt),
+      ),
       pagination: {
         total,
         page: parseInt(page),
@@ -156,7 +185,10 @@ router.get("/:matchId/search", async (req, res, next) => {
   try {
     const searchTerm = String(q || "").trim();
     if (searchTerm.length < 2) {
-      throw new ValidationError("Search query must be at least 2 characters", "q");
+      throw new ValidationError(
+        "Search query must be at least 2 characters",
+        "q",
+      );
     }
 
     const match = await Match.findById(req.params.matchId);
@@ -167,8 +199,8 @@ router.get("/:matchId/search", async (req, res, next) => {
 
     // Verify user is part of this match
     if (
-      match.farmer_id.toString() !== req.user._id.toString()
-      && match.vendor_id.toString() !== req.user._id.toString()
+      match.farmer_id.toString() !== req.user._id.toString() &&
+      match.vendor_id.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         error: "Not authorized to search this conversation",
@@ -224,8 +256,10 @@ router.get("/:matchId", async (req, res, next) => {
     }
 
     // Verify user is part of this match
-    if (match.farmer_id.toString() !== req.user._id.toString() &&
-        match.vendor_id.toString() !== req.user._id.toString()) {
+    if (
+      match.farmer_id.toString() !== req.user._id.toString() &&
+      match.vendor_id.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         error: "Not authorized to view this conversation",
         code: "UNAUTHORIZED",
@@ -233,8 +267,14 @@ router.get("/:matchId", async (req, res, next) => {
     }
 
     const skip = (page - 1) * limit;
-    const messages = await Message.getConversation(req.params.matchId, limit, skip);
-    const total = await Message.countDocuments({ match_id: req.params.matchId });
+    const messages = await Message.getConversation(
+      req.params.matchId,
+      limit,
+      skip,
+    );
+    const total = await Message.countDocuments({
+      match_id: req.params.matchId,
+    });
 
     // Mark messages as read
     await Message.updateMany(
@@ -245,7 +285,7 @@ router.get("/:matchId", async (req, res, next) => {
       },
       {
         status: "read",
-      }
+      },
     );
 
     res.json({
@@ -270,7 +310,11 @@ router.put("/:messageId/flag", async (req, res, next) => {
   const { reason } = req.body;
 
   try {
-    const message = await Message.flagMessage(req.params.messageId, req.user._id, reason);
+    const message = await Message.flagMessage(
+      req.params.messageId,
+      req.user._id,
+      reason,
+    );
 
     if (!message) {
       return next(new NotFoundError("Message"));
@@ -334,18 +378,16 @@ router.get("/admin/flagged", async (req, res, next) => {
     const total = await Message.countDocuments({ status });
 
     res.json({
-      messages: messages
-        .slice(skip, skip + parseInt(limit))
-        .map((msg) => ({
-          _id: msg._id,
-          sender: msg.sender_id.email,
-          recipient: msg.recipient_id.email,
-          content: msg.content,
-          flagReason: msg.flagReason,
-          status: msg.status,
-          aiAnalysisResult: msg.aiAnalysisResult,
-          createdAt: msg.createdAt,
-        })),
+      messages: messages.slice(skip, skip + parseInt(limit)).map((msg) => ({
+        _id: msg._id,
+        sender: msg.sender_id.email,
+        recipient: msg.recipient_id.email,
+        content: msg.content,
+        flagReason: msg.flagReason,
+        status: msg.status,
+        aiAnalysisResult: msg.aiAnalysisResult,
+        createdAt: msg.createdAt,
+      })),
       pagination: {
         total,
         page: parseInt(page),
@@ -385,11 +427,14 @@ router.put("/:messageId/admin/approve", async (req, res, next) => {
       message.flagReason = null;
     } else if (action === "reject") {
       message.status = "archived";
-      
+
       // Record violation against sender for confirmed suspicious behavior
       await recordFlaggedMessage(message.sender_id);
     } else {
-      throw new ValidationError("Action must be 'approve' or 'reject'", "action");
+      throw new ValidationError(
+        "Action must be 'approve' or 'reject'",
+        "action",
+      );
     }
 
     await message.save();
@@ -430,20 +475,19 @@ router.get("/admin/ai-analysis", async (req, res, next) => {
       suspicious: await Message.countDocuments({
         "aiAnalysisResult.isSuspicious": true,
       }),
-      avgRiskScore:
-        await Message.aggregate([
-          {
-            $match: {
-              "aiAnalysisResult.timestamp": { $exists: true },
-            },
+      avgRiskScore: await Message.aggregate([
+        {
+          $match: {
+            "aiAnalysisResult.timestamp": { $exists: true },
           },
-          {
-            $group: {
-              _id: null,
-              avgRisk: { $avg: "$aiAnalysisResult.riskScore" },
-            },
+        },
+        {
+          $group: {
+            _id: null,
+            avgRisk: { $avg: "$aiAnalysisResult.riskScore" },
           },
-        ]),
+        },
+      ]),
       recentSuspicious: suspiciousMessages.map((msg) => ({
         id: msg._id,
         sender: msg.sender_id,

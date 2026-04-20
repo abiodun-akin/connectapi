@@ -264,6 +264,32 @@ const emailTemplates = {
       </div>
     `,
   },
+  "auth.recovery_codes_email_requested": {
+    subject: "Your Farm Connect Recovery Codes",
+    html: (data) => `
+      <div style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
+        <div style="background: white; max-width: 560px; margin: 0 auto; padding: 30px; border-radius: 8px;">
+          <h1 style="color: #2c3e50; margin-top: 0;">Your Recovery Codes</h1>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            Here are your recovery codes for two-factor authentication. Keep these codes in a safe place. You can use any of these codes to regain access to your account if you lose access to your authenticator device.
+          </p>
+          <div style="margin: 24px 0; padding: 20px; background: #f9f9f9; border-left: 4px solid #27ae60; border-radius: 4px;">
+            <p style="color: #333; font-size: 14px; line-height: 1.8; font-family: monospace; white-space: pre-wrap; word-break: break-all; margin: 0;">
+${data.recoveryCodes ? data.recoveryCodes.join("\n") : "No recovery codes available"}
+            </p>
+          </div>
+          <div style="margin: 20px 0; padding: 16px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+            <p style="color: #856404; font-size: 14px; margin: 0;">
+              <strong>⚠️ Important:</strong> Do not share these codes with anyone. Each code can only be used once.
+            </p>
+          </div>
+          <p style="color: #777; font-size: 14px; margin-top: 20px;">
+            If you did not request this email or do not have 2FA enabled, please ignore it.
+          </p>
+        </div>
+      </div>
+    `,
+  },
 };
 
 const sendEmail = async (email, eventType, data) => {

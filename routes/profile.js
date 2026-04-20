@@ -7,6 +7,7 @@ const UserProfile = require("../userProfile");
 const Subscription = require("../subscription");
 const { AFRICAN_COUNTRY_SET } = require("../utils/africanCountries");
 const { ValidationError, NotFoundError } = require("../errors/AppError");
+const { generateMatchesForProfile } = require("../utils/matchGenerator");
 
 /**
  * POST /api/profile/initialize
@@ -123,6 +124,13 @@ router.post("/farmer", emailVerificationRequired, async (req, res, next) => {
       farmerDetails: farmerData.farmerDetails,
     });
 
+    // Generate matches for this newly completed profile
+    if (profile && profile.isProfileComplete) {
+      generateMatchesForProfile(req.user._id, profile).catch((error) => {
+        console.error("Error generating matches for farmer profile:", error);
+      });
+    }
+
     res.json({
       message: "Farmer profile completed successfully",
       profile,
@@ -191,6 +199,13 @@ router.post("/vendor", emailVerificationRequired, async (req, res, next) => {
       profileImageUrl: vendorData.profileImageUrl,
       vendorDetails: vendorData.vendorDetails,
     });
+
+    // Generate matches for this newly completed profile
+    if (profile && profile.isProfileComplete) {
+      generateMatchesForProfile(req.user._id, profile).catch((error) => {
+        console.error("Error generating matches for vendor profile:", error);
+      });
+    }
 
     res.json({
       message: "Vendor profile completed successfully",

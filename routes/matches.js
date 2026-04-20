@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Match = require("../match");
+const Message = require("../message");
 const UserProfile = require("../userProfile");
 const { calculateTotalActivityScore } = require("../utils/activityScorer");
 const { NotFoundError, ValidationError } = require("../errors/AppError");
@@ -102,6 +103,33 @@ router.get("/", async (req, res, next) => {
       query.farmer_id = req.user._id;
     } else if (userProfile.profileType === "vendor") {
       query.vendor_id = req.user._id;
+    }
+
+    // Reconcile stale statuses: if a match has message activity, it should be connected.
+    const participantField =
+      userProfile.profileType === "farmer" ? "farmer_id" : "vendor_id";
+    const interestedMatches = await Match.find({
+      [participantField]: req.user._id,
+      status: "interested",
+    })
+      .select("_id")
+      .lean();
+
+    if (interestedMatches.length > 0) {
+      const interestedIds = interestedMatches.map((item) => item._id);
+      const activeConversationMatchIds = await Message.distinct("match_id", {
+        match_id: { $in: interestedIds },
+      });
+
+      if (activeConversationMatchIds.length > 0) {
+        await Match.updateMany(
+          {
+            _id: { $in: activeConversationMatchIds },
+            status: "interested",
+          },
+          { $set: { status: "connected" } },
+        );
+      }
     }
 
     if (
@@ -324,9 +352,13 @@ router.post("/:matchId/express-interest", async (req, res, next) => {
       });
     }
 
+    // Determine which profile type is expressing interest
+    const initiatingUserIsFarmer =
+      match.farmer_id.toString() === req.user._id.toString();
+
     match.status = "interested";
     match.dateInterestShown = new Date();
-    match.initiatedBy = req.user._id;
+    match.initiatedBy = initiatingUserIsFarmer ? "farmer" : "vendor";
     await match.save();
 
     res.json({

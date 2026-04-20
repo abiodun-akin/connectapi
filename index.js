@@ -367,6 +367,15 @@ const registerRealtimeHandlers = (ioInstance) => {
           attachment,
         });
 
+        // Update match status to 'connected' if currently 'interested' (first message flow)
+        if (match.status === "interested") {
+          await Match.findByIdAndUpdate(
+            matchId,
+            { status: "connected" },
+            { new: true },
+          );
+        }
+
         ioInstance.to(`match:${matchId}`).emit("new-message", {
           _id: message._id,
           match_id: message.match_id,

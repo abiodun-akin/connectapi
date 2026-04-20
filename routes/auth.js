@@ -894,7 +894,7 @@ router.post("/2fa/recovery-codes/send-email", async (req, res, next) => {
     }
 
     // Publish event for async email sending
-    publishEvent("auth_events", "recovery_codes_email_requested", {
+    publishEvent("auth_events", "auth.recovery_codes_email_requested", {
       userId: user._id.toString(),
       email: user.email,
       timestamp: new Date(),
@@ -947,7 +947,7 @@ router.post("/2fa/setup", async (req, res, next) => {
  */
 router.post("/2fa/setup/verify", async (req, res, next) => {
   try {
-    const { user } = await resolveAuthenticatedSession(req);
+    let { user } = await resolveAuthenticatedSession(req);
     const { totpCode } = req.body || {};
 
     if (!totpCode || !/^\d{6}$/.test(String(totpCode))) {
@@ -957,6 +957,8 @@ router.post("/2fa/setup/verify", async (req, res, next) => {
       );
     }
 
+    // Re-fetch user with twoFactorSecret field (it's hidden by default)
+    user = await User.findById(user._id).select("+twoFactorSecret");
     if (!user.twoFactorSecret) {
       throw new ValidationError(
         "TOTP setup has not been initiated",
