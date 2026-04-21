@@ -4,6 +4,7 @@ const User = require("../user");
 const Message = require("../message");
 const Subscription = require("../subscription");
 const AgentApplication = require("../agentApplication");
+const ProductListing = require("../models/productListing");
 const bcrypt = require("bcryptjs");
 const validator = require("validator");
 const {
@@ -32,6 +33,208 @@ const verifyAdmin = async (req, res, next) => {
 
 // Apply admin middleware to all routes
 router.use(verifyAdmin);
+
+const LISTING_MODERATION_ACTION_TO_STATUS = {
+  enable: "enabled",
+  unsuspend: "enabled",
+  disable: "disabled",
+  suspend: "suspended",
+};
+
+const resolveModerationStatus = (action) => {
+  const normalizedAction = String(action || "")
+    .trim()
+    .toLowerCase();
+  return LISTING_MODERATION_ACTION_TO_STATUS[normalizedAction] || null;
+};
+
+/**
+ * GET /api/admin/listings
+ * List listings for moderation
+ */
+router.get("/listings", async (req, res, next) => {
+  const {
+    limit = 20,
+    page = 1,
+    search = "",
+    moderationStatus = "all",
+  } = req.query;
+
+  try {
+    const parsedLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const skip = (parsedPage - 1) * parsedLimit;
+
+    const query = {};
+    const normalizedStatus = String(moderationStatus || "all").toLowerCase();
+    if (["enabled", "suspended", "disabled"].includes(normalizedStatus)) {
+      query.moderationStatus = normalizedStatus;
+    }
+
+    const normalizedSearch = String(search || "").trim();
+    if (normalizedSearch) {
+      query.$or = [
+        { title: { $regex: normalizedSearch, $options: "i" } },
+        { description: { $regex: normalizedSearch, $options: "i" } },
+        { "products.name": { $regex: normalizedSearch, $options: "i" } },
+      ];
+    }
+
+    const [listings, total] = await Promise.all([
+      ProductListing.find(query)
+        .populate("owner_id", "email name")
+        .sort({ updatedAt: -1 })
+        .limit(parsedLimit)
+        .skip(skip)
+        .lean(),
+      ProductListing.countDocuments(query),
+    ]);
+
+    res.json({
+      listings: listings.map((listing) => ({
+        _id: listing._id,
+        title: listing.title,
+        owner: {
+          _id: listing.owner_id?._id || listing.owner_id,
+          name: listing.owner_id?.name || "",
+          email: listing.owner_id?.email || "",
+        },
+        ownerProfileType: listing.ownerProfileType,
+        visibilityStatus: listing.visibilityStatus,
+        suspendedReason: listing.suspendedReason || "",
+        moderationStatus: listing.moderationStatus || "enabled",
+        moderationReason: listing.moderationReason || "",
+        productCount: Array.isArray(listing.products)
+          ? listing.products.length
+          : 0,
+        activeProductCount: Array.isArray(listing.products)
+          ? listing.products.filter(
+              (product) =>
+                (product?.moderationStatus || "enabled") === "enabled",
+            ).length
+          : 0,
+        products: (listing.products || []).map((product, index) => ({
+          index,
+          name: product.name,
+          category: product.category || "",
+          quantityAvailable: product.quantityAvailable,
+          price: product.price,
+          currency: product.currency,
+          moderationStatus: product.moderationStatus || "enabled",
+          moderationReason: product.moderationReason || "",
+        })),
+        updatedAt: listing.updatedAt,
+      })),
+      pagination: {
+        total,
+        page: parsedPage,
+        limit: parsedLimit,
+        pages: Math.ceil(total / parsedLimit),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /api/admin/listings/:listingId/moderation
+ * Moderate listing visibility (enable/disable/suspend/unsuspend)
+ */
+router.patch("/listings/:listingId/moderation", async (req, res, next) => {
+  const { action, reason = "" } = req.body || {};
+
+  try {
+    const nextStatus = resolveModerationStatus(action);
+    if (!nextStatus) {
+      return next(
+        new ValidationError(
+          "Action must be one of: enable, unsuspend, disable, suspend",
+          "action",
+        ),
+      );
+    }
+
+    const listing = await ProductListing.findById(req.params.listingId);
+    if (!listing) {
+      return next(new NotFoundError("Product listing"));
+    }
+
+    listing.moderationStatus = nextStatus;
+    listing.moderationReason =
+      nextStatus === "enabled" ? "" : String(reason || "").trim();
+    await listing.save();
+
+    res.json({
+      message: "Listing moderation updated",
+      listing: {
+        _id: listing._id,
+        moderationStatus: listing.moderationStatus,
+        moderationReason: listing.moderationReason,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /api/admin/listings/:listingId/products/:productIndex/moderation
+ * Moderate individual product visibility (enable/disable/suspend/unsuspend)
+ */
+router.patch(
+  "/listings/:listingId/products/:productIndex/moderation",
+  async (req, res, next) => {
+    const { action, reason = "" } = req.body || {};
+
+    try {
+      const nextStatus = resolveModerationStatus(action);
+      if (!nextStatus) {
+        return next(
+          new ValidationError(
+            "Action must be one of: enable, unsuspend, disable, suspend",
+            "action",
+          ),
+        );
+      }
+
+      const listing = await ProductListing.findById(req.params.listingId);
+      if (!listing) {
+        return next(new NotFoundError("Product listing"));
+      }
+
+      const index = parseInt(req.params.productIndex, 10);
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= listing.products.length
+      ) {
+        return next(
+          new ValidationError("Invalid product index", "productIndex"),
+        );
+      }
+
+      listing.products[index].moderationStatus = nextStatus;
+      listing.products[index].moderationReason =
+        nextStatus === "enabled" ? "" : String(reason || "").trim();
+      listing.markModified("products");
+      await listing.save();
+
+      res.json({
+        message: "Product moderation updated",
+        listingId: listing._id,
+        product: {
+          index,
+          name: listing.products[index].name,
+          moderationStatus: listing.products[index].moderationStatus,
+          moderationReason: listing.products[index].moderationReason,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 /**
  * GET /api/admin/users
@@ -545,7 +748,7 @@ router.put("/messages/:messageId/approve", async (req, res, next) => {
         status: "sent",
         flagReason: null,
       },
-      { new: true }
+      { new: true },
     );
 
     if (!message) {
@@ -575,7 +778,8 @@ router.put("/messages/:messageId/approve", async (req, res, next) => {
  */
 router.delete("/messages/:messageId", async (req, res, next) => {
   const { messageId } = req.params;
-  const { sendWarning = false, reason = "Message violates policy" } = req.body || {};
+  const { sendWarning = false, reason = "Message violates policy" } =
+    req.body || {};
 
   try {
     const message = await Message.findByIdAndDelete(messageId);
@@ -588,7 +792,7 @@ router.delete("/messages/:messageId", async (req, res, next) => {
     const sender = await User.findById(message.sender_id);
     if (sender) {
       sender.flaggedMessageCount += 1;
-      
+
       // If sendWarning, record violation
       if (sendWarning) {
         sender.violationCount = (sender.violationCount || 0) + 1;
@@ -623,7 +827,8 @@ router.delete("/messages/:messageId", async (req, res, next) => {
  */
 router.post("/messages/:messageId/warn-sender", async (req, res, next) => {
   const { messageId } = req.params;
-  const { reason = "Your message violated our community guidelines" } = req.body || {};
+  const { reason = "Your message violated our community guidelines" } =
+    req.body || {};
 
   try {
     const message = await Message.findById(messageId);

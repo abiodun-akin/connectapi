@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const path = require("path");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -12,6 +13,7 @@ const paymentRoutes = require("./routes/payment");
 const profileRoutes = require("./routes/profile");
 const matchesRoutes = require("./routes/matches");
 const messagesRoutes = require("./routes/messages");
+const listingsRoutes = require("./routes/listings");
 const notificationPreferencesRoutes = require("./routes/notificationPreferences");
 const adminRoutes = require("./routes/admin");
 const adminAgentsRoutes = require("./routes/adminAgents");
@@ -128,6 +130,14 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use(
+  "/uploads/listings",
+  express.static(
+    process.env.LISTING_UPLOAD_DIR ||
+      path.join(__dirname, "uploads", "listings"),
+  ),
+);
+
+app.use(
   cors({
     origin: corsOriginHandler,
     credentials: true,
@@ -194,6 +204,10 @@ app.use(
   requireFeatureAccess(FEATURE_ACCESS.CORE),
   messagesRoutes,
 );
+
+// Product listing routes
+// Includes public discovery endpoints and authenticated CRUD endpoints.
+app.use("/api/listings", listingsRoutes);
 
 // Admin routes (require authentication + email verification + admin status)
 app.use("/api/admin", requireAuth, emailVerificationRequired, adminRoutes);

@@ -6,7 +6,7 @@
  *
  * Improvements in v2:
  * - Context-aware pattern detection
- * - Weighted pattern scoring 
+ * - Weighted pattern scoring
  * - Confidence scoring
  * - False positive reduction
  */
@@ -19,7 +19,12 @@ const enhancedAnalyzer = require("./messageAnalyzerEnhanced");
  * v1 (default): Simple pattern matching
  * v2 (enhanced): Context-aware with weighted patterns - reduces false positives
  */
-function analyzeMessagePatterns(content, useEnhanced = false) {
+function analyzeMessagePatterns(content, options = false) {
+  const useEnhanced =
+    typeof options === "boolean"
+      ? options
+      : Boolean(options && options.useEnhanced);
+
   if (useEnhanced) {
     // Path B: Enhanced analyzer with context awareness
     const enhanced = enhancedAnalyzer.analyzeMessagePatternsEnhanced(content);
@@ -100,6 +105,22 @@ function analyzeMessagePatternsOriginal(content) {
   let riskScore = 0;
   const flaggedPatterns = [];
 
+  const transactionalKeywordMatches =
+    String(content)
+      .toLowerCase()
+      .match(
+        /\b(money|transfer|wire|bank|account|payment|deposit|send|pay|funds?)\b/g,
+      ) || [];
+  const uniqueTransactionalKeywords = new Set(transactionalKeywordMatches);
+
+  if (uniqueTransactionalKeywords.size >= 2) {
+    riskScore += 32;
+    flaggedPatterns.push({
+      category: "payment",
+      pattern: "multiple-transaction-keywords",
+    });
+  }
+
   for (const category in suspiciousPatterns) {
     const patterns = suspiciousPatterns[category];
     for (const pattern of patterns) {
@@ -143,7 +164,7 @@ function analyzeMessagePatternsOriginal(content) {
   }
 
   riskScore = Math.min(riskScore, 100);
-  const isSuspicious = riskScore > 30;
+  const isSuspicious = riskScore >= 30;
 
   let reason = "";
   if (riskScore === 0) {
@@ -202,14 +223,14 @@ function formatAnalysisResult(analysis) {
  * Unified analysis: Gemini (primary) + Pattern Matching (fallback)
  * IMPORTANT: This function is ASYNC - must use await
  */
-async function analyzeMessage(content) {
+async function analyzeMessage(content, options = {}) {
   // Get pattern analysis as fallback
-  const patternAnalysis = analyzeMessagePatterns(content);
+  const patternAnalysis = analyzeMessagePatterns(content, options);
 
   // Try Gemini analysis
   const geminiResult = await geminiAnalyzer.analyzeMessage(
     content,
-    patternAnalysis
+    patternAnalysis,
   );
 
   return geminiResult;

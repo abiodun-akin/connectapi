@@ -16,7 +16,9 @@ const normalizeAttachment = (attachment) => {
 
   const url = String(attachment.url || "").trim();
   const name = String(attachment.name || "").trim();
-  const mimeType = String(attachment.mimeType || "").trim().toLowerCase();
+  const mimeType = String(attachment.mimeType || "")
+    .trim()
+    .toLowerCase();
   const size = Number(attachment.size || 0);
 
   if (!url || !name || !mimeType || !Number.isFinite(size) || size <= 0) {
@@ -89,7 +91,7 @@ const messageSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 messageSchema.index({ sender_id: 1, recipient_id: 1, createdAt: -1 });
@@ -117,22 +119,22 @@ messageSchema.pre("save", async function (next) {
       try {
         adaptiveConfig = await adaptiveLearningService.getAdaptiveConfiguration(
           this.sender_id,
-          communityId
+          communityId,
         );
       } catch (configError) {
-        console.warn("[Adaptive Learning] Config fetch failed, using defaults:", configError.message);
+        console.warn(
+          "[Adaptive Learning] Config fetch failed, using defaults:",
+          configError.message,
+        );
         // Continues with defaults if learning service unavailable
       }
 
       // Analyze with adaptive weights if available
-      const analysis = await analyzeMessage(
-        this.content || "",
-        {
-          patternWeights: adaptiveConfig.patternWeights,
-          riskThreshold: adaptiveConfig.customRiskThreshold,
-          contextFactors: adaptiveConfig.contextFactors,
-        }
-      );
+      const analysis = await analyzeMessage(this.content || "", {
+        patternWeights: adaptiveConfig.patternWeights,
+        riskThreshold: adaptiveConfig.customRiskThreshold,
+        contextFactors: adaptiveConfig.contextFactors,
+      });
 
       this.aiAnalysisResult = {
         ...analysis,
@@ -164,10 +166,11 @@ messageSchema.pre("save", async function (next) {
 
 // Static methods
 messageSchema.statics.sendMessage = async function (messageData) {
-  const { sender_id, recipient_id, match_id, content, attachment } = messageData;
+  const { sender_id, recipient_id, match_id, content, attachment } =
+    messageData;
   const normalizedContent = String(content || "").trim();
   const normalizedAttachment = normalizeAttachment(attachment);
-  
+
   return this.create({
     sender_id,
     recipient_id,
@@ -177,10 +180,16 @@ messageSchema.statics.sendMessage = async function (messageData) {
   });
 };
 
-messageSchema.statics.getConversation = async function (match_id, limit = 50, skip = 0) {
+messageSchema.statics.getConversation = async function (
+  match_id,
+  limit = 50,
+  skip = 0,
+) {
   return this.find({
     match_id,
   })
+    .populate("sender_id", "email name")
+    .populate("recipient_id", "email name")
     .select("sender_id recipient_id content attachment status createdAt")
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -196,7 +205,7 @@ messageSchema.statics.markAsRead = async function (recipient_id, match_id) {
       match_id,
       status: "sent",
     },
-    { status: "read" }
+    { status: "read" },
   );
 };
 
@@ -207,7 +216,7 @@ messageSchema.statics.flagMessage = async function (messageId, userId, reason) {
       status: "flagged",
       flagReason: reason || "User flagged",
     },
-    { new: true }
+    { new: true },
   );
 };
 
