@@ -36,7 +36,8 @@ const patternDefinitions = {
       category: "payment",
     },
     {
-      pattern: /western\s+union|money\s+gram|paypal|cryptocurrency|bitcoin|ethereum|crypto/gi,
+      pattern:
+        /western\s+union|money\s+gram|paypal|cryptocurrency|bitcoin|ethereum|crypto/gi,
       weight: 18,
       category: "payment",
     },
@@ -63,9 +64,7 @@ const patternDefinitions = {
       contextRequired: ["love", "forever", "money"],
       contextBoost: 15,
       // Whitelist terms that commonly use "marry" in farm context
-      whitelistPatterns: [
-        /combine|pair|match|companion|breed|cross/gi,
-      ],
+      whitelistPatterns: [/combine|pair|match|companion|breed|cross/gi],
     },
     {
       pattern: /boyfriend|girlfriend|husband|wife/gi,
@@ -152,7 +151,9 @@ const warningKeywords = {
     weight: 5,
   },
   pressure: {
-    patterns: [/must|have\s+to|cannot|don't|penalty|will\s+take\s+action|or\s+else/gi],
+    patterns: [
+      /must|have\s+to|cannot|don't|penalty|will\s+take\s+action|or\s+else/gi,
+    ],
     weight: 6,
   },
   secrecy: {
@@ -207,13 +208,15 @@ function analyzeMessagePatternsEnhanced(content) {
 
   const hasFarmContext = farmContextCount >= 2;
   if (hasFarmContext) {
-    contextualNotes.push("Farm/agriculture context detected - context-aware analysis applied");
+    contextualNotes.push(
+      "Farm/agriculture context detected - context-aware analysis applied",
+    );
   }
 
   // Analyze each category
   for (const category in patternDefinitions) {
     const patterns = patternDefinitions[category];
-    
+
     for (const patternDef of patterns) {
       if (patternDef.pattern.test(content)) {
         // Check for whitelist patterns (e.g., "marry" in farm context)
@@ -222,7 +225,9 @@ function analyzeMessagePatternsEnhanced(content) {
           for (const whitelistPattern of patternDef.whitelistPatterns) {
             if (whitelistPattern.test(content)) {
               whitelisted = true;
-              contextualNotes.push(`"${patternDef.pattern.source}" appears in farm/neutral context`);
+              contextualNotes.push(
+                `"${patternDef.pattern.source}" appears in farm/neutral context`,
+              );
               break;
             }
             whitelistPattern.lastIndex = 0;
@@ -237,18 +242,25 @@ function analyzeMessagePatternsEnhanced(content) {
 
         // Check for required context
         let contextScore = patternDef.weight;
-        if (patternDef.contextRequired && patternDef.contextRequired.length > 0) {
+        if (
+          patternDef.contextRequired &&
+          patternDef.contextRequired.length > 0
+        ) {
           const contextMatches = patternDef.contextRequired.filter((ctx) =>
-            content.toLowerCase().includes(ctx)
+            content.toLowerCase().includes(ctx),
           ).length;
 
           // Reduce score if context is missing
           if (contextMatches === 0) {
             contextScore *= 0.3; // Only 30% weight without context
-            contextualNotes.push(`"${category}" pattern found but missing money/urgency context`);
+            contextualNotes.push(
+              `"${category}" pattern found but missing money/urgency context`,
+            );
           } else if (contextMatches < patternDef.contextRequired.length) {
             contextScore *= 0.6; // Partial context
-            contextualNotes.push(`"${category}" pattern found with partial context (${contextMatches}/${patternDef.contextRequired.length})`);
+            contextualNotes.push(
+              `"${category}" pattern found with partial context (${contextMatches}/${patternDef.contextRequired.length})`,
+            );
           } else {
             contextScore += patternDef.contextBoost || 0; // Full context bonus
           }
@@ -336,14 +348,14 @@ function analyzeMessagePatternsEnhanced(content) {
 
   // Determine if suspicious (score > 30, consider confidence)
   let isSuspicious = riskScore > 30;
-  
+
   // Low confidence can override marginal scores (20-30 range)
   // But don't override high-weight patterns like passwords, wire transfers, bank requests
   const highRiskPatternFound = flaggedPatterns.some(
     (p) =>
       (p.weight >= 20 && ["payment", "phishing"].includes(p.category)) ||
       p.pattern.includes("password") ||
-      p.pattern.includes("bank\s+account")
+      /bank\s+account/i.test(p.pattern),
   );
 
   if (confidence < 0.5 && riskScore < 50 && !highRiskPatternFound) {
@@ -354,7 +366,9 @@ function analyzeMessagePatternsEnhanced(content) {
   if (riskScore === 0) {
     reason = "No suspicious patterns detected";
   } else if (flaggedPatterns.length > 0) {
-    const topCategories = [...new Set(flaggedPatterns.map((p) => p.category))].slice(0, 2).join(", ");
+    const topCategories = [...new Set(flaggedPatterns.map((p) => p.category))]
+      .slice(0, 2)
+      .join(", ");
     reason = `Detected ${topCategories} pattern(s) - Confidence: ${(confidence * 100).toFixed(0)}%`;
   } else if (detectedKeywords.length > 0) {
     reason = `Warning keywords detected: ${detectedKeywords.join(", ")}`;
