@@ -41,7 +41,11 @@ const ensureListingUploadDir = async () => {
   await fs.mkdir(LISTING_UPLOAD_DIR, { recursive: true });
 };
 
-const buildListingImageUrl = (fileName) => `/uploads/listings/${fileName}`;
+const buildListingImageUrl = (fileName, req) => {
+  const protocol = req.protocol;
+  const host = req.get("host");
+  return `${protocol}://${host}/uploads/listings/${fileName}`;
+};
 
 const makeSafeFileName = (originalName, mimetype) => {
   const baseName =
@@ -275,7 +279,7 @@ router.post(
               await fs.writeFile(filePath, file.buffer);
 
               return {
-                url: buildListingImageUrl(safeName),
+                url: buildListingImageUrl(safeName, req),
                 name: file.originalname,
                 mimeType: file.mimetype,
                 size: file.size,
