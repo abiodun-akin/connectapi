@@ -140,6 +140,29 @@ const startWorker = async () => {
     const connection = await amqplib.connect(process.env.RABBITMQ_URL);
     const channel = await connection.createChannel();
 
+    connection.on("error", (err) => {
+      console.error("[Push] RabbitMQ connection error:", err.message || err);
+    });
+    connection.on("close", () => {
+      console.warn("[Push] RabbitMQ connection closed. Reconnecting in 5s...");
+      setTimeout(startWorker, 5000);
+    });
+    channel.on("error", (err) => {
+      console.error("[Push] RabbitMQ channel error:", err.message || err);
+    });
+
+    const exchanges = [
+      "auth_events",
+      "payment_events",
+      "trial_events",
+      "activity_events",
+      "match_events",
+    ];
+
+    for (const exchangeName of exchanges) {
+      await channel.assertExchange(exchangeName, "topic", { durable: true });
+    }
+
     // Assert push notification queue
     const pushQueue = await channel.assertQueue("push_notifications", {
       durable: true,
@@ -171,6 +194,8 @@ const startWorker = async () => {
     console.error("[Push] Failed to start push notification worker:", error);
   }
 };
+
+startWorker();
 
 module.exports = {
   startWorker,
