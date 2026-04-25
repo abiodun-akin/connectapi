@@ -24,8 +24,26 @@ const errorHandler = require("../middleware/errorHandler");
 describe("Matches country/state filter integration", () => {
   let app;
 
+  const buildInterestedMatchesQuery = () => ({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
+
+  const buildMainMatchesQuery = (docs) => ({
+    sort: jest.fn().mockReturnThis(),
+    populate: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue(docs),
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
+
+    Match.find.mockImplementation((query) => {
+      if (query?.status === "interested") {
+        return buildInterestedMatchesQuery();
+      }
+      return buildMainMatchesQuery([]);
+    });
 
     app = express();
     app.use(express.json());
@@ -109,15 +127,12 @@ describe("Matches country/state filter integration", () => {
       },
     ];
 
-    const queryChain = {
-      sort: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      skip: jest.fn().mockReturnThis(),
-      populate: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue(matchDocs),
-    };
-
-    Match.find.mockReturnValue(queryChain);
+    Match.find.mockImplementation((query) => {
+      if (query?.status === "interested") {
+        return buildInterestedMatchesQuery();
+      }
+      return buildMainMatchesQuery(matchDocs);
+    });
     Match.countDocuments.mockResolvedValue(1);
     calculateTotalActivityScore
       .mockResolvedValueOnce(78)
@@ -214,13 +229,12 @@ describe("Matches country/state filter integration", () => {
       },
     ];
 
-    const queryChain = {
-      sort: jest.fn().mockReturnThis(),
-      populate: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue(matchDocs),
-    };
-
-    Match.find.mockReturnValue(queryChain);
+    Match.find.mockImplementation((query) => {
+      if (query?.status === "interested") {
+        return buildInterestedMatchesQuery();
+      }
+      return buildMainMatchesQuery(matchDocs);
+    });
     Match.countDocuments.mockResolvedValue(2);
     calculateTotalActivityScore
       .mockResolvedValueOnce(80)
@@ -260,15 +274,12 @@ describe("Matches country/state filter integration", () => {
     const distinct = jest.fn().mockResolvedValue(["farmer-1", "farmer-2"]);
     UserProfile.find.mockReturnValue({ distinct });
 
-    const queryChain = {
-      sort: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      skip: jest.fn().mockReturnThis(),
-      populate: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue([]),
-    };
-
-    Match.find.mockReturnValue(queryChain);
+    Match.find.mockImplementation((query) => {
+      if (query?.status === "interested") {
+        return buildInterestedMatchesQuery();
+      }
+      return buildMainMatchesQuery([]);
+    });
     Match.countDocuments.mockResolvedValue(0);
 
     const response = await request(app).get(

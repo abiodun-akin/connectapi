@@ -2,67 +2,24 @@ const express = require("express");
 const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
-const multer = require("multer");
+const {
+  upload,
+  uploadToCloudinary,
+  deleteFromCloudinary,
+} = require("../services/fileUploadService");
 
 const router = express.Router();
 const ProductListing = require("../models/productListing");
 const Subscription = require("../subscription");
 const UserProfile = require("../userProfile");
 const Match = require("../match");
+const AuditLog = require("../auditLog");
 const { calculateTotalActivityScore } = require("../utils/activityScorer");
 const requireAuth = require("../middleware/requireAuth");
 const {
   emailVerificationRequired,
 } = require("../middleware/emailVerificationRequired");
 const { ValidationError, NotFoundError } = require("../errors/AppError");
-
-const LISTING_UPLOAD_DIR =
-  process.env.LISTING_UPLOAD_DIR ||
-  path.join(__dirname, "..", "uploads", "listings");
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 3 * 1024 * 1024,
-    files: 3,
-  },
-  fileFilter: (_req, file, callback) => {
-    if (!String(file.mimetype || "").startsWith("image/")) {
-      return callback(
-        new ValidationError("Only image files are allowed", "images"),
-        false,
-      );
-    }
-    return callback(null, true);
-  },
-});
-
-const ensureListingUploadDir = async () => {
-  await fs.mkdir(LISTING_UPLOAD_DIR, { recursive: true });
-};
-
-const buildListingImageUrl = (fileName) => `/uploads/listings/${fileName}`;
-
-const makeSafeFileName = (originalName, mimetype) => {
-  const baseName =
-    String(originalName || "image")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "image";
-
-  const extensionFromName = path.extname(originalName || "").toLowerCase();
-  const extensionFromType =
-    mimetype === "image/png"
-      ? ".png"
-      : mimetype === "image/webp"
-        ? ".webp"
-        : ".jpg";
-
-  return `${Date.now()}-${crypto.randomUUID()}-${baseName}${
-    extensionFromName || extensionFromType
-  }`;
-};
 
 const normalizeProducts = (
   products = [],
@@ -227,8 +184,6 @@ router.post(
       const activePremium = await requireActivePremium(req, res);
       if (!activePremium) return undefined;
 
-      await ensureListingUploadDir();
-
       upload.array("images", 3)(req, res, async (uploadError) => {
         try {
           if (uploadError) {
@@ -267,18 +222,22 @@ router.post(
 
           const storedFiles = await Promise.all(
             files.map(async (file) => {
-              const safeName = makeSafeFileName(
-                file.originalname,
-                file.mimetype,
+              const result = await uploadToCloudinary(
+                file.buffer,
+                "farmconnect/listings",
+                {
+                  public_id: `listing_${Date.now()}_${Math.random().toString(36).substring(2)}`,
+                  resource_type: "image",
+                },
               );
-              const filePath = path.join(LISTING_UPLOAD_DIR, safeName);
-              await fs.writeFile(filePath, file.buffer);
 
               return {
-                url: buildListingImageUrl(safeName),
+                url: result.url,
+                publicId: result.public_id,
                 name: file.originalname,
                 mimeType: file.mimetype,
                 size: file.size,
+                format: result.format,
               };
             }),
           );
@@ -287,10 +246,27 @@ router.post(
             message: "Images uploaded successfully",
             files: storedFiles,
           });
+
+          // Log audit event
+          await AuditLog.logAction({
+            userId: req.user._id,
+            action: "FILE_UPLOAD",
+            resource: "FILE",
+            details: {
+              fileCount: storedFiles.length,
+              totalSize: storedFiles.reduce((sum, file) => sum + file.size, 0),
+              ipAddress: req.ip,
+              userAgent: req.get("User-Agent"),
+            },
+            ipAddress: req.ip,
+            userAgent: req.get("User-Agent"),
+          });
         } catch (error) {
           return next(error);
         }
       });
+
+      // Log audit event - MOVED INSIDE THE CALLBACK ABOVE
     } catch (error) {
       next(error);
     }

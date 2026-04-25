@@ -36,6 +36,20 @@ const userProfileSchema = new mongoose.Schema(
     bio: String,
     profileImageUrl: String,
 
+    // Social Media Links
+    socialMedia: {
+      facebook: String,
+      twitter: String,
+      instagram: String,
+      linkedin: String,
+      youtube: String,
+      whatsapp: String,
+      website: String,
+    },
+
+    // Push Notification Tokens
+    fcmTokens: [String], // Firebase Cloud Messaging tokens for push notifications
+
     // Farmer-specific fields
     farmerDetails: {
       farmingAreas: [String], // Dropdown: Crop farming, Livestock, Aquaculture, Mixed farming, etc.
@@ -72,20 +86,31 @@ const userProfileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-userProfileSchema.index({ profileType: 1, country: 1, state: 1, isProfileComplete: 1 });
+userProfileSchema.index({
+  profileType: 1,
+  country: 1,
+  state: 1,
+  isProfileComplete: 1,
+});
 
 // Static methods
-userProfileSchema.statics.createUserProfile = async function (userId, profileType) {
+userProfileSchema.statics.createUserProfile = async function (
+  userId,
+  profileType,
+) {
   return this.create({
     user_id: userId,
     profileType,
   });
 };
 
-userProfileSchema.statics.updateFarmerProfile = async function (userId, farmerData) {
+userProfileSchema.statics.updateFarmerProfile = async function (
+  userId,
+  farmerData,
+) {
   return this.findOneAndUpdate(
     { user_id: userId },
     {
@@ -93,11 +118,14 @@ userProfileSchema.statics.updateFarmerProfile = async function (userId, farmerDa
       isProfileComplete: true,
       ...farmerData,
     },
-    { new: true }
+    { new: true },
   );
 };
 
-userProfileSchema.statics.updateVendorProfile = async function (userId, vendorData) {
+userProfileSchema.statics.updateVendorProfile = async function (
+  userId,
+  vendorData,
+) {
   return this.findOneAndUpdate(
     { user_id: userId },
     {
@@ -105,7 +133,7 @@ userProfileSchema.statics.updateVendorProfile = async function (userId, vendorDa
       isProfileComplete: true,
       ...vendorData,
     },
-    { new: true }
+    { new: true },
   );
 };
 

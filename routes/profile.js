@@ -5,6 +5,7 @@ const {
 } = require("../middleware/emailVerificationRequired");
 const UserProfile = require("../userProfile");
 const Subscription = require("../subscription");
+const AuditLog = require("../auditLog");
 const { AFRICAN_COUNTRY_SET } = require("../utils/africanCountries");
 const { ValidationError, NotFoundError } = require("../errors/AppError");
 const { generateMatchesForProfile } = require("../utils/matchGenerator");
@@ -302,6 +303,17 @@ router.put("/", emailVerificationRequired, async (req, res, next) => {
     if (!profile) {
       return next(new NotFoundError("User profile"));
     }
+
+    // Log audit event
+    await AuditLog.logAction({
+      userId: req.user._id,
+      action: "PROFILE_UPDATE",
+      resource: "PROFILE",
+      resourceId: profile._id,
+      details: req.body,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    });
 
     res.json({
       message: "Profile updated successfully",

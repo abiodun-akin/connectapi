@@ -99,13 +99,59 @@ messageSchema.index({ match_id: 1, createdAt: -1 });
 messageSchema.index({ status: 1, createdAt: -1 });
 messageSchema.index({ "aiAnalysisResult.isSuspicious": 1 });
 
+const normalizeAnalysisResult = (analysis) => {
+  if (!analysis || typeof analysis !== "object") {
+    return {
+      isSuspicious: false,
+      riskScore: 0,
+      reason: "No analysis available",
+      flaggedPatterns: [],
+      timestamp: new Date(),
+    };
+  }
+
+  const rawPatterns = Array.isArray(analysis.flaggedPatterns)
+    ? analysis.flaggedPatterns
+    : Array.isArray(analysis.detectedPatterns)
+      ? analysis.detectedPatterns
+      : [];
+
+  const flaggedPatterns = rawPatterns
+    .map((item) => {
+      if (typeof item === "string") {
+        return { category: "unknown", pattern: item };
+      }
+      if (item && typeof item === "object") {
+        return {
+          category: item.category || "unknown",
+          pattern: item.pattern || "unknown",
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  return {
+    isSuspicious: Boolean(analysis.isSuspicious),
+    riskScore: Number.isFinite(Number(analysis.riskScore))
+      ? Number(analysis.riskScore)
+      : 0,
+    reason: String(analysis.reason || "No analysis reason provided"),
+    flaggedPatterns,
+    timestamp: analysis.timestamp ? new Date(analysis.timestamp) : new Date(),
+  };
+};
+
 // Pre-save hook: Analyze message content with adaptive learning
 messageSchema.pre("save", async function (next) {
   if (!this.content && !this.attachment) {
     return next(new Error("Message must include content or attachment"));
   }
 
-  if (!this.aiAnalysisResult) {
+  if (
+    !this.aiAnalysisResult ||
+    typeof this.aiAnalysisResult.isSuspicious !== "boolean"
+  ) {
     try {
       const adaptiveLearningService = require("./services/adaptiveLearningService");
       const User = require("./user");
@@ -136,10 +182,7 @@ messageSchema.pre("save", async function (next) {
         contextFactors: adaptiveConfig.contextFactors,
       });
 
-      this.aiAnalysisResult = {
-        ...analysis,
-        adaptiveConfig: !!adaptiveConfig.customRiskThreshold, // Flag if adaptive weights used
-      };
+      this.aiAnalysisResult = normalizeAnalysisResult(analysis);
 
       // Auto-flag if suspicious
       if (analysis.isSuspicious) {
@@ -152,7 +195,7 @@ messageSchema.pre("save", async function (next) {
       // Continue with patterns-only fallback (keep existing behavior)
       const { analyzeMessagePatterns } = require("./utils/messageAnalyzer");
       const analysis = analyzeMessagePatterns(this.content || "");
-      this.aiAnalysisResult = analysis;
+      this.aiAnalysisResult = normalizeAnalysisResult(analysis);
       if (analysis.isSuspicious) {
         this.status = "flagged";
         this.flagReason = "AI: " + analysis.reason;

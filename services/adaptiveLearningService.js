@@ -61,11 +61,7 @@ async function recordAdminFeedback(data) {
 /**
  * Process admin feedback to learn from pattern effectiveness
  */
-async function processAdminFeedback(
-  feedback,
-  originalAnalysis,
-  adminDecision
-) {
+async function processAdminFeedback(feedback, originalAnalysis, adminDecision) {
   const { flaggedPatterns } = originalAnalysis;
 
   if (!flaggedPatterns || flaggedPatterns.length === 0) {
@@ -90,7 +86,10 @@ async function processAdminFeedback(
       // Update stats based on admin decision
       patternRecord.stats.totalDetections += 1;
 
-      if (adminDecision === "correct" || adminDecision === "partially_correct") {
+      if (
+        adminDecision === "correct" ||
+        adminDecision === "partially_correct"
+      ) {
         patternRecord.stats.confirmedAccurate += 1;
       } else if (adminDecision === "false_positive") {
         patternRecord.stats.falsePositives += 1;
@@ -102,15 +101,14 @@ async function processAdminFeedback(
       await recalculatePatternMetrics(patternRecord);
 
       // Update recommended weight based on effectiveness
-      patternRecord.recommendedWeight = calculateRecommendedWeight(
-        patternRecord
-      );
+      patternRecord.recommendedWeight =
+        calculateRecommendedWeight(patternRecord);
 
       await patternRecord.save();
     } catch (error) {
       console.error(
         `[Learning] Failed to update pattern ${patternKey}:`,
-        error.message
+        error.message,
       );
     }
   }
@@ -129,7 +127,8 @@ async function recalculatePatternMetrics(patternRecord) {
 
   // Recall: Of all actual scams, how many did we catch?
   const totalActualScams = confirmedAccurate + falseNegatives;
-  const recall = totalActualScams > 0 ? confirmedAccurate / totalActualScams : 0;
+  const recall =
+    totalActualScams > 0 ? confirmedAccurate / totalActualScams : 0;
 
   // F1 Score: Harmonic mean of precision and recall
   const f1Score =
@@ -263,12 +262,8 @@ async function updateUserReputation(userId, adminDecision) {
  * Calculate reputation score (0-100)
  */
 function calculateReputation(rep) {
-  const {
-    totalMessages,
-    confirmedScams,
-    falseFlags,
-    cleanMessages,
-  } = rep.stats;
+  const { totalMessages, confirmedScams, falseFlags, cleanMessages } =
+    rep.stats;
 
   if (totalMessages === 0) {
     rep.reputationScore = 50;
@@ -321,6 +316,33 @@ function determineTrustLevel(rep) {
   }
 
   return "new";
+}
+
+/**
+ * Update community moderation stats used for threshold calibration
+ */
+async function updateCommunityStats(communityId, adminDecision) {
+  try {
+    let config = await CommunityThresholds.findOne({ communityId });
+
+    if (!config) {
+      config = await CommunityThresholds.create({ communityId });
+    }
+
+    config.stats.totalMessages += 1;
+
+    if (adminDecision === "correct" || adminDecision === "partially_correct") {
+      config.stats.confirmedScams += 1;
+    }
+
+    config.lastCalibrated = new Date();
+    await config.save();
+
+    return config;
+  } catch (error) {
+    console.error("[Learning] Failed to update community stats:", error);
+    return null;
+  }
 }
 
 /**
@@ -403,10 +425,10 @@ async function calibrateCommunityThresholds(communityId) {
 
     // Count false positives and false negatives
     const falsePositives = recentFeedback.filter(
-      (f) => f.adminDecision === "false_positive"
+      (f) => f.adminDecision === "false_positive",
     ).length;
     const falseNegatives = recentFeedback.filter(
-      (f) => f.adminDecision === "false_negative"
+      (f) => f.adminDecision === "false_negative",
     ).length;
 
     const totalReviewed = recentFeedback.length;
@@ -441,12 +463,16 @@ async function getLearningStats(communityId = null) {
     // Calculate average effectiveness
     const avgF1 =
       patterns.length > 0
-        ? (patterns.reduce((sum, p) => sum + p.f1Score, 0) / patterns.length).toFixed(3)
+        ? (
+            patterns.reduce((sum, p) => sum + p.f1Score, 0) / patterns.length
+          ).toFixed(3)
         : 0;
 
     // Pattern quality breakdown
     const qualityBreakdown = {
-      "A+": patterns.filter((p) => p.f1Score >= 0.9 && p.stats.falsePositives === 0).length,
+      "A+": patterns.filter(
+        (p) => p.f1Score >= 0.9 && p.stats.falsePositives === 0,
+      ).length,
       A: patterns.filter((p) => p.f1Score >= 0.85).length,
       "B+": patterns.filter((p) => p.f1Score >= 0.75).length,
       B: patterns.filter((p) => p.f1Score >= 0.65).length,
@@ -459,7 +485,8 @@ async function getLearningStats(communityId = null) {
     const trustDistribution = {
       verified: userStats.filter((u) => u.trustLevel === "verified").length,
       trusted: userStats.filter((u) => u.trustLevel === "trusted").length,
-      established: userStats.filter((u) => u.trustLevel === "established").length,
+      established: userStats.filter((u) => u.trustLevel === "established")
+        .length,
       new: userStats.filter((u) => u.trustLevel === "new").length,
       flagged: userStats.filter((u) => u.trustLevel === "flagged").length,
     };

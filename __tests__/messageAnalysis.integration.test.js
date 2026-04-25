@@ -16,7 +16,9 @@ describe("Message Analysis Integration - Schema", () => {
   beforeAll(async () => {
     // Connect to test database
     if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(process.env.CONN_STR || "mongodb://localhost:27017/farmconnect_test");
+      await mongoose.connect(
+        process.env.CONN_STR || "mongodb://localhost:27017/farmconnect_test",
+      );
     }
   });
 
@@ -46,7 +48,7 @@ describe("Message Analysis Integration - Schema", () => {
     testMatch = await Match.create({
       farmer_id: farmer._id,
       vendor_id: vendor._id,
-      status: "approved",
+      status: "connected",
     });
   });
 
@@ -171,12 +173,12 @@ describe("Message Analysis Integration - Schema", () => {
       await message.save();
 
       const saved = await Message.findById(message._id);
-      const analysisTime = new Date(
-        saved.aiAnalysisResult.timestamp
-      );
+      const analysisTime = new Date(saved.aiAnalysisResult.timestamp);
 
-      expect(analysisTime).toBeGreaterThanOrEqual(beforeSave);
-      expect(analysisTime).toBeLessThanOrEqual(new Date());
+      expect(analysisTime.getTime()).toBeGreaterThanOrEqual(
+        beforeSave.getTime(),
+      );
+      expect(analysisTime.getTime()).toBeLessThanOrEqual(Date.now());
     });
   });
 
@@ -208,7 +210,7 @@ describe("Message Analysis Integration - Schema", () => {
 
       const saved = await Message.findById(message._id);
       const hasCategory = saved.aiAnalysisResult.flaggedPatterns.some(
-        (p) => p.category
+        (p) => p.category,
       );
       expect(hasCategory).toBe(true);
     });
@@ -228,7 +230,7 @@ describe("Message Analysis Integration - Schema", () => {
         match_id: testMatch._id,
         sender_id: farmer._id,
         recipient_id: vendor._id,
-        content: "Wire $1000 now",
+        content: "Wire transfer to my bank account now",
       });
 
       await safeMsg.save();
@@ -241,17 +243,13 @@ describe("Message Analysis Integration - Schema", () => {
 
       expect(flagged.length).toBeGreaterThan(0);
       expect(
-        flagged.every((m) => m.aiAnalysisResult.isSuspicious === true)
+        flagged.every((m) => m.aiAnalysisResult.isSuspicious === true),
       ).toBe(true);
     });
 
     test("should efficiently query by risk score range", async () => {
       // Create messages with varying risk
-      const messages = [
-        "Safe message",
-        "Wire money",
-        "URGENT! PAY NOW!!!",
-      ];
+      const messages = ["Safe message", "Wire money", "URGENT! PAY NOW!!!"];
 
       for (const content of messages) {
         const msg = new Message({
@@ -268,12 +266,10 @@ describe("Message Analysis Integration - Schema", () => {
         "aiAnalysisResult.riskScore": { $gt: 50 },
       });
 
-      console.log(
-        `\nFound ${highRisk.length} high-risk messages out of 3`
+      console.log(`\nFound ${highRisk.length} high-risk messages out of 3`);
+      expect(highRisk.every((m) => m.aiAnalysisResult.riskScore > 50)).toBe(
+        true,
       );
-      expect(
-        highRisk.every((m) => m.aiAnalysisResult.riskScore > 50)
-      ).toBe(true);
     });
   });
 
@@ -321,7 +317,7 @@ describe("Message Analysis Integration - Schema", () => {
             sender_id: farmer._id,
             recipient_id: vendor._id,
             content: i % 2 === 0 ? "Safe message" : "Wire money urgently",
-          })
+          }),
         );
       }
 
@@ -341,8 +337,8 @@ describe("Message Analysis Integration - Schema", () => {
       const messages = [
         "Safe message",
         "Safe message",
-        "Wire $100",
-        "URGENT WIRE NOW",
+        "Wire transfer to my bank account now",
+        "URGENT verify account password and wire transfer now",
       ];
 
       for (const content of messages) {
@@ -394,7 +390,7 @@ describe("Message Analysis Integration - Schema", () => {
       const updated = await Message.findById(message._id);
       // Analysis should remain the same
       expect(updated.aiAnalysisResult.riskScore).toBe(
-        originalAnalysis.riskScore
+        originalAnalysis.riskScore,
       );
     });
   });

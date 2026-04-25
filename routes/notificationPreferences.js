@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const NotificationPreference = require("../notificationPreference");
+const UserProfile = require("../userProfile");
+const AuditLog = require("../auditLog");
 const { ValidationError } = require("../errors/AppError");
 
 /**
@@ -204,6 +206,90 @@ router.put("/reset", async (req, res, next) => {
     res.json({
       message: "Notification preferences reset to defaults",
       preferences,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/notification-preferences/fcm-token
+ * Register FCM token for push notifications
+ */
+router.post("/fcm-token", async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token || typeof token !== "string") {
+      throw new ValidationError("Valid FCM token is required", "token");
+    }
+
+    const profile = await UserProfile.findOneAndUpdate(
+      { user_id: req.user._id },
+      { $addToSet: { fcmTokens: token } },
+      { new: true, upsert: true },
+    );
+
+    // Log audit event
+    await AuditLog.logAction({
+      userId: req.user._id,
+      action: "NOTIFICATION_SEND",
+      resource: "NOTIFICATION",
+      details: {
+        type: "fcm_token_registered",
+        token: token.substring(0, 10) + "...", // Log partial token for security
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    });
+
+    res.json({
+      message: "FCM token registered successfully",
+      tokenCount: profile.fcmTokens?.length || 0,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/notification-preferences/fcm-token
+ * Unregister FCM token
+ */
+router.delete("/fcm-token", async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token || typeof token !== "string") {
+      throw new ValidationError("Valid FCM token is required", "token");
+    }
+
+    const profile = await UserProfile.findOneAndUpdate(
+      { user_id: req.user._id },
+      { $pull: { fcmTokens: token } },
+      { new: true },
+    );
+
+    // Log audit event
+    await AuditLog.logAction({
+      userId: req.user._id,
+      action: "NOTIFICATION_SEND",
+      resource: "NOTIFICATION",
+      details: {
+        type: "fcm_token_unregistered",
+        token: token.substring(0, 10) + "...", // Log partial token for security
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    });
+
+    res.json({
+      message: "FCM token unregistered successfully",
+      tokenCount: profile?.fcmTokens?.length || 0,
     });
   } catch (error) {
     next(error);
