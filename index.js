@@ -84,11 +84,14 @@ const getAllowedOrigins = () => {
     .map((origin) => normalizeOrigin(origin))
     .filter(Boolean);
 
-  if (configuredOrigins.length > 0) {
-    return [...new Set(configuredOrigins)];
-  }
+  const defaults = [
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ];
 
-  return ["http://localhost", "http://localhost:5173", "http://127.0.0.1:5173"];
+  return [...new Set([...configuredOrigins, ...defaults])];
 };
 
 const allowedOrigins = getAllowedOrigins();

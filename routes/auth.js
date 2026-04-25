@@ -9,6 +9,7 @@ const Subscription = require("../subscription");
 const PromoCode = require("../promoCode");
 const AgentLedger = require("../agentLedger");
 const UserProfile = require("../userProfile");
+const AuditLog = require("../auditLog");
 const { publishEvent } = require("../middleware/eventNotification");
 const {
   validateRequest,
@@ -557,6 +558,22 @@ router.post(
         expiresInHours: 24,
       });
 
+      // Log audit event
+      await AuditLog.logAction({
+        userId: user._id,
+        action: "SIGNUP",
+        resource: "USER",
+        resourceId: user._id,
+        details: {
+          authMethod: "password",
+          promoCode: promoAttribution?.code || null,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      });
+
       res.status(201).json({
         message: "User created successfully",
         user: {
@@ -644,6 +661,21 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
       ...buildAuthEventMetadata(req, {
         authMethod: "password",
       }),
+    });
+
+    // Log audit event
+    await AuditLog.logAction({
+      userId: user._id,
+      action: "LOGIN",
+      resource: "USER",
+      resourceId: user._id,
+      details: {
+        authMethod: "password",
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
     });
 
     res.json({
@@ -1252,6 +1284,23 @@ router.get("/social/:provider/callback", async (req, res) => {
       ...buildAuthEventMetadata(req, {
         authMethod: provider,
       }),
+    });
+
+    // Log audit event
+    await AuditLog.logAction({
+      userId: user._id,
+      action: isNewUser ? "SIGNUP" : "LOGIN",
+      resource: "USER",
+      resourceId: user._id,
+      details: {
+        authMethod: provider,
+        provider,
+        isNewUser,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
     });
 
     return res.redirect(
