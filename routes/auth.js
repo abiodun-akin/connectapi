@@ -50,6 +50,24 @@ const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "1d";
 const TWO_FACTOR_CHALLENGE_EXPIRATION = "10m";
 const TWO_FACTOR_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const TWO_FACTOR_MAX_ATTEMPTS = 5;
+const SOCIAL_EXCHANGE_TTL_MS = 60 * 1000; // 60 seconds
+
+// In-memory store for one-time OAuth exchange codes: code -> { token, expiresAt }
+const socialExchangeStore = new Map();
+
+const createSocialExchangeCode = (token) => {
+  const code = crypto.randomBytes(32).toString("hex");
+  socialExchangeStore.set(code, { token, expiresAt: Date.now() + SOCIAL_EXCHANGE_TTL_MS });
+  return code;
+};
+
+const consumeSocialExchangeCode = (code) => {
+  const entry = socialExchangeStore.get(code);
+  if (!entry) return null;
+  socialExchangeStore.delete(code);
+  if (Date.now() > entry.expiresAt) return null;
+  return entry.token;
+};
 
 const extractAuthToken = (req) => {
   const authHeader = req.headers.authorization;
@@ -687,6 +705,16 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
       token,
     });
   } catch (error) {
+    // Enhanced logging for debugging authentication issues
+    console.error("Authentication Error - Login Failed", {
+      email: req.body?.email || "unknown",
+      errorMessage: error.message,
+      errorCode: error.code,
+      timestamp: new Date().toISOString(),
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+    });
+    
     next(new AuthenticationError("Invalid email or password"));
   }
 });
@@ -1227,6 +1255,21 @@ router.get("/social/:provider/start", async (req, res) => {
 
     return res.redirect(authorizationUrl.toString());
   } catch (error) {
+    // Enhanced logging for OAuth configuration issues
+    console.error("Authentication Error - OAuth Start Failed", {
+      provider,
+      mode,
+      errorMessage: error.message,
+      errorCode: error.code || "UNKNOWN",
+      timestamp: new Date().toISOString(),
+      ipAddress: req.ip,
+      configDetails: {
+        hasClientId: !!process.env.GOOGLE_OAUTH_CLIENT_ID || !!process.env.GOOGLE_CLIENT_ID,
+        hasClientSecret: !!process.env.GOOGLE_OAUTH_CLIENT_SECRET || !!process.env.GOOGLE_CLIENT_SECRET,
+        redirectUriConfigured: !!process.env.GOOGLE_OAUTH_REDIRECT_URI,
+      },
+    });
+    
     const redirectUrl = getFrontendCallbackUrl({
       provider,
       mode,
@@ -1306,21 +1349,68 @@ router.get("/social/:provider/callback", async (req, res) => {
       userAgent: req.get("User-Agent"),
     });
 
+    const exchangeCode = createSocialExchangeCode(token);
+
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
         mode: state.mode,
         status: "success",
         newUser: isNewUser,
+        code: exchangeCode,
       }),
     );
   } catch (error) {
+    // Enhanced logging for OAuth debugging
+    console.error("Authentication Error - OAuth Callback Failed", {
+      provider: String(req.params.provider || "").toLowerCase(),
+      errorMessage: error.message,
+      errorCode: error.code || "UNKNOWN",
+      errorDetails: error.details || {},
+      timestamp: new Date().toISOString(),
+      ipAddress: req.ip,
+      queryParams: Object.keys(req.query),
+    });
+    
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
         error: error.message || "Social authentication failed",
       }),
     );
+  }
+});
+
+router.post("/social/exchange", async (req, res, next) => {
+  try {
+    const { code } = req.body || {};
+    if (!code || typeof code !== "string" || code.length !== 64) {
+      throw new ValidationError("Invalid exchange code", "code");
+    }
+
+    const token = consumeSocialExchangeCode(code);
+    if (!token) {
+      throw new AuthenticationError("Exchange code is invalid or has expired");
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, getTokenSecret());
+    } catch (_err) {
+      throw new AuthenticationError("Invalid session token");
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user || user.isSuspended) {
+      throw new AuthenticationError("User not found or suspended");
+    }
+
+    const authUser = await serializeAuthUser(user);
+    setAuthCookie(res, token);
+
+    res.json({ user: authUser, token });
+  } catch (error) {
+    next(error);
   }
 });
 
