@@ -246,25 +246,27 @@ router.post(
             message: "Images uploaded successfully",
             files: storedFiles,
           });
+
+          // Log audit event
+          await AuditLog.logAction({
+            userId: req.user._id,
+            action: "FILE_UPLOAD",
+            resource: "FILE",
+            details: {
+              fileCount: storedFiles.length,
+              totalSize: storedFiles.reduce((sum, file) => sum + file.size, 0),
+              ipAddress: req.ip,
+              userAgent: req.get("User-Agent"),
+            },
+            ipAddress: req.ip,
+            userAgent: req.get("User-Agent"),
+          });
         } catch (error) {
           return next(error);
         }
       });
 
-      // Log audit event
-      await AuditLog.logAction({
-        userId: req.user._id,
-        action: "FILE_UPLOAD",
-        resource: "FILE",
-        details: {
-          fileCount: storedFiles.length,
-          totalSize: storedFiles.reduce((sum, file) => sum + file.size, 0),
-          ipAddress: req.ip,
-          userAgent: req.get("User-Agent"),
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("User-Agent"),
-      });
+      // Log audit event - MOVED INSIDE THE CALLBACK ABOVE
     } catch (error) {
       next(error);
     }
