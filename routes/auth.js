@@ -50,7 +50,7 @@ const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "1d";
 const TWO_FACTOR_CHALLENGE_EXPIRATION = "10m";
 const TWO_FACTOR_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const TWO_FACTOR_MAX_ATTEMPTS = 5;
-const SOCIAL_EXCHANGE_TTL_MS = 60 * 1000; // 60 seconds
+const SOCIAL_EXCHANGE_TTL_MS = 5 * 60 * 1000; // 5 minutes (300 seconds) - increased from 60s to accommodate slow networks and mobile
 
 // In-memory store for one-time OAuth exchange codes: code -> { token, expiresAt }
 const socialExchangeStore = new Map();
@@ -1286,32 +1286,68 @@ router.get("/social/:provider/callback", async (req, res) => {
     const providerConfig = getSocialProviderConfig(provider, req);
     ensureProviderConfigured(providerConfig);
 
+    console.log("[OAuth Callback] Started", {
+      provider,
+      timestamp: new Date().toISOString(),
+    });
+
     if (req.query.error) {
+      console.warn("[OAuth Callback] OAuth provider error", {
+        provider,
+        error: req.query.error,
+        errorDescription: req.query.error_description,
+      });
       throw new AuthenticationError(
         String(req.query.error_description || req.query.error),
       );
     }
 
     if (!req.query.code || !req.query.state) {
+      console.warn("[OAuth Callback] Missing code or state", {
+        provider,
+        hasCode: !!req.query.code,
+        hasState: !!req.query.state,
+      });
       throw new AuthenticationError("Social authentication was not completed");
     }
 
     const state = jwt.verify(String(req.query.state), getTokenSecret());
     if (state.provider !== provider) {
+      console.warn("[OAuth Callback] State provider mismatch", {
+        provider,
+        stateProvider: state.provider,
+      });
       throw new AuthenticationError("Invalid social authentication state");
     }
+
+    console.log("[OAuth Callback] Exchanging authorization code", {
+      provider,
+    });
 
     const tokenSet = await exchangeAuthorizationCode(
       providerConfig,
       String(req.query.code),
     );
+
+    console.log("[OAuth Callback] Code exchanged successfully", { provider });
+
     const profile = await fetchSocialProfile(
       providerConfig,
       tokenSet.access_token,
     );
+
+    console.log("[OAuth Callback] Profile fetched", {
+      provider,
+      email: profile.email,
+    });
+
     const { user, isNewUser } = await findOrCreateSocialUser(provider, profile);
 
     if (user.isSuspended) {
+      console.warn("[OAuth Callback] User account suspended", {
+        provider,
+        userId: user._id,
+      });
       throw new AuthorizationError("Account suspended");
     }
 
@@ -1351,6 +1387,13 @@ router.get("/social/:provider/callback", async (req, res) => {
 
     const exchangeCode = createSocialExchangeCode(token);
 
+    console.log("[OAuth Callback] Exchange code created", {
+      provider,
+      userId: user._id,
+      isNewUser,
+      ttlSeconds: SOCIAL_EXCHANGE_TTL_MS / 1000,
+    });
+
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
@@ -1371,7 +1414,7 @@ router.get("/social/:provider/callback", async (req, res) => {
       ipAddress: req.ip,
       queryParams: Object.keys(req.query),
     });
-    
+
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
@@ -1382,14 +1425,30 @@ router.get("/social/:provider/callback", async (req, res) => {
 });
 
 router.post("/social/exchange", async (req, res, next) => {
+  const startTime = Date.now();
+  const { code } = req.body || {};
+
   try {
-    const { code } = req.body || {};
+    console.log("[OAuth Exchange] Started", {
+      codeLength: code?.length || null,
+      timestamp: new Date().toISOString(),
+    });
+
     if (!code || typeof code !== "string" || code.length !== 64) {
+      console.warn("[OAuth Exchange] Validation failed", {
+        provided: code?.length || null,
+        expected: 64,
+        type: typeof code,
+      });
       throw new ValidationError("Invalid exchange code", "code");
     }
 
     const token = consumeSocialExchangeCode(code);
     if (!token) {
+      console.warn("[OAuth Exchange] Code not found or expired", {
+        codePrefix: code?.substring(0, 8) + "...",
+        timestamp: new Date().toISOString(),
+      });
       throw new AuthenticationError("Exchange code is invalid or has expired");
     }
 
@@ -1397,19 +1456,40 @@ router.post("/social/exchange", async (req, res, next) => {
     try {
       decoded = jwt.verify(token, getTokenSecret());
     } catch (_err) {
+      console.error("[OAuth Exchange] Token verification failed", {
+        error: _err.message,
+      });
       throw new AuthenticationError("Invalid session token");
     }
 
     const user = await User.findById(decoded.id);
     if (!user || user.isSuspended) {
+      console.warn("[OAuth Exchange] User not found or suspended", {
+        userId: decoded.id,
+        suspended: user?.isSuspended || false,
+      });
       throw new AuthenticationError("User not found or suspended");
     }
 
     const authUser = await serializeAuthUser(user);
     setAuthCookie(res, token);
 
+    console.log("[OAuth Exchange] Success", {
+      userId: user._id,
+      email: user.email,
+      duration: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
+
     res.json({ user: authUser, token });
   } catch (error) {
+    console.error("[OAuth Exchange] Failed", {
+      code: code?.substring(0, 8) + "..." || "MISSING",
+      error: error.message,
+      errorCode: error.code || "UNKNOWN",
+      duration: Date.now() - startTime,
+      timestamp: new Date().toISOString(),
+    });
     next(error);
   }
 });
