@@ -74,8 +74,7 @@ const extractAuthToken = (req) => {
   return authHeader?.split(" ")[1] || req.cookies.jwt || null;
 };
 
-const getTokenSecret = () =>
-  process.env.TOKEN_SECRET;
+const getTokenSecret = () => process.env.TOKEN_SECRET;
 
 const signAuthToken = (userId) =>
   jwt.sign({ id: userId }, getTokenSecret(), {
@@ -1243,22 +1242,26 @@ router.get("/social/:provider/start", async (req, res) => {
 
 router.get("/social/:provider/callback", async (req, res) => {
   const provider = String(req.params.provider || "").toLowerCase();
+  console.log(`[OAuth Callback] Received request for ${provider}`);
 
   try {
     const providerConfig = getSocialProviderConfig(provider, req);
     ensureProviderConfigured(providerConfig);
 
     if (req.query.error) {
+      console.warn(`[OAuth Callback] Provider reported error: ${req.query.error}`);
       throw new AuthenticationError(
         String(req.query.error_description || req.query.error),
       );
     }
 
     if (!req.query.code || !req.query.state) {
+      console.warn("[OAuth Callback] Missing code or state in callback query");
       throw new AuthenticationError("Social authentication was not completed");
     }
 
     const state = jwt.verify(String(req.query.state), getTokenSecret());
+    console.log("[OAuth Callback] State verified successfully", { mode: state.mode });
     if (state.provider !== provider) {
       throw new AuthenticationError("Invalid social authentication state");
     }
@@ -1267,11 +1270,13 @@ router.get("/social/:provider/callback", async (req, res) => {
       providerConfig,
       String(req.query.code),
     );
+    console.log("[OAuth Callback] Authorization code exchanged for token");
 
     const profile = await fetchSocialProfile(
       providerConfig,
       tokenSet.access_token,
     );
+    console.log(`[OAuth Callback] Profile fetched for ${profile.email}`);
 
     const { user, isNewUser } = await findOrCreateSocialUser(provider, profile);
 
@@ -1336,15 +1341,26 @@ router.get("/social/:provider/callback", async (req, res) => {
 });
 
 router.post("/social/exchange", async (req, res, next) => {
+  const startTime = Date.now();
   const { code } = req.body || {};
 
   try {
+    console.log("[OAuth Exchange] Started", {
+      code: code ? `${code.substring(0, 8)}...` : "missing",
+    });
+
     if (!code || typeof code !== "string" || code.length !== 64) {
+      console.warn("[OAuth Exchange] Invalid code format", {
+        length: code?.length || 0,
+      });
       throw new ValidationError("Invalid exchange code", "code");
     }
 
     const token = await consumeSocialExchangeCode(code);
     if (!token) {
+      console.warn("[OAuth Exchange] Code expired or not found", {
+        code: `${code.substring(0, 8)}...`,
+      });
       throw new AuthenticationError(
         "Exchange code is invalid or has expired",
         "EXCHANGE_CODE_EXPIRED",
@@ -1355,18 +1371,34 @@ router.post("/social/exchange", async (req, res, next) => {
     try {
       decoded = jwt.verify(token, getTokenSecret());
     } catch (_err) {
+      console.error("[OAuth Exchange] Invalid token in exchange store", {
+        error: _err.message,
+      });
       throw new AuthenticationError("Invalid session token");
     }
 
     const user = await User.findById(decoded.id);
     if (!user || user.isSuspended) {
+      console.warn("[OAuth Exchange] User not found or suspended", {
+        userId: decoded.id,
+      });
       throw new AuthenticationError("User not found or suspended");
     }
 
     const authUser = await serializeAuthUser(user);
     setAuthCookie(res, token);
+
+    console.log("[OAuth Exchange] Success", {
+      userId: user._id,
+      duration: `${Date.now() - startTime}ms`,
+    });
+
     res.json({ user: authUser, token });
   } catch (error) {
+    console.error("[OAuth Exchange] Failed", {
+      error: error.message,
+      duration: `${Date.now() - startTime}ms`,
+    });
     next(error);
   }
 });
