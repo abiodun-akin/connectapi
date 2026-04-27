@@ -146,7 +146,7 @@ app.use(
   cors({
     origin: corsOriginHandler,
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -329,10 +329,7 @@ const registerRealtimeHandlers = (ioInstance) => {
         return next(new Error("Authentication required"));
       }
 
-      const decoded = jwt.verify(
-        token,
-        process.env.TOKEN_SECRET,
-      );
+      const decoded = jwt.verify(token, process.env.TOKEN_SECRET);
       socket.userId = decoded.id;
       return next();
     } catch (error) {
