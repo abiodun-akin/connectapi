@@ -1,11 +1,11 @@
 const moongoese = require("mongoose");
 
 const dbConnect = () => {
+  if (!process.env.CONN_STR) {
+    throw new Error("CONN_STR environment variable is not set");
+  }
   moongoese
-    .connect(
-      process.env.CONN_STR ||
-        "mongodb+srv://connect_db_user:iQedFIijzEs5BmxR@connectdb.n0yqaed.mongodb.net/?appName=Connectdb"
-    )
+    .connect(process.env.CONN_STR)
     .then(() => {
       console.log("MongoDB connected successfully");
     })

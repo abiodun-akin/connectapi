@@ -80,10 +80,24 @@ router.get("/", async (req, res, next) => {
   try {
     const userProfile = await UserProfile.findOne({ user_id: req.user._id });
 
-    if (!userProfile || !userProfile.isProfileComplete) {
+    if (!userProfile) {
+      console.log(`[Matches] Profile not found for user ${req.user._id}`);
       return res.status(400).json({
-        error: "Profile must be complete to view matches",
+        error: "Please complete your profile to view matches",
         code: "PROFILE_INCOMPLETE",
+        detail: "profile_not_found",
+      });
+    }
+
+    if (!userProfile.isProfileComplete) {
+      console.log(
+        `[Matches] Profile incomplete for user ${req.user._id}, profileType: ${userProfile.profileType}`,
+      );
+      return res.status(400).json({
+        error: "Please complete your profile to view matches",
+        code: "PROFILE_INCOMPLETE",
+        detail: "profile_not_complete",
+        profileType: userProfile.profileType,
       });
     }
 

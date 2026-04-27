@@ -46,9 +46,7 @@ const publishEvent = async (exchange, eventType, data) => {
     }
     const payload = JSON.stringify(data);
     channel.publish(exchange, eventType, Buffer.from(payload));
-    console.log(
-      `[RabbitMQ] Published ${eventType} to exchange ${exchange} | email: ${data.email || "n/a"} | payload: ${payload}`,
-    );
+    console.log(`[RabbitMQ] Published ${eventType} to exchange ${exchange}`);
   } catch (error) {
     console.error(`[RabbitMQ] Failed to publish ${eventType}:`, error.message);
   }

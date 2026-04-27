@@ -18,6 +18,7 @@ const notificationPreferencesRoutes = require("./routes/notificationPreferences"
 const adminRoutes = require("./routes/admin");
 const adminAgentsRoutes = require("./routes/adminAgents");
 const adminPaymentRoutes = require("./routes/adminPayment");
+const adminFeedbackRoutes = require("./routes/adminFeedback");
 const agentsRoutes = require("./routes/agents");
 const cronRoutes = require("./routes/cron");
 const requireAuth = require("./middleware/requireAuth");
@@ -222,6 +223,12 @@ app.use(
   adminPaymentRoutes,
 );
 app.use(
+  "/api/admin",
+  requireAuth,
+  emailVerificationRequired,
+  adminFeedbackRoutes,
+);
+app.use(
   "/api/admin/agents",
   requireAuth,
   emailVerificationRequired,
@@ -324,7 +331,7 @@ const registerRealtimeHandlers = (ioInstance) => {
 
       const decoded = jwt.verify(
         token,
-        process.env.TOKEN_SECRET || "fallback-secret-for-dev-only",
+        process.env.TOKEN_SECRET,
       );
       socket.userId = decoded.id;
       return next();

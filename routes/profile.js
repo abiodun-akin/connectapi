@@ -12,64 +12,62 @@ const { generateMatchesForProfile } = require("../utils/matchGenerator");
 
 /**
  * POST /api/profile/initialize
- * Initialize user profile (choose farmer or vendor) - requires email verification
+ * Initialize user profile (choose farmer or vendor)
+ * No email verification required - part of onboarding flow
  */
-router.post(
-  "/initialize",
-  emailVerificationRequired,
-  async (req, res, next) => {
-    const { profileType } = req.body;
+router.post("/initialize", async (req, res, next) => {
+  const { profileType } = req.body;
 
-    try {
-      if (!["farmer", "vendor"].includes(profileType)) {
-        throw new ValidationError(
-          "Profile type must be farmer or vendor",
-          "profileType",
-        );
-      }
-
-      const existingProfile = await UserProfile.getUserProfile(req.user._id);
-
-      // If profile is already complete, don't allow re-initialization
-      if (existingProfile && existingProfile.isProfileComplete) {
-        return res.status(400).json({
-          error: "Profile already completed",
-          code: "PROFILE_ALREADY_COMPLETE",
-        });
-      }
-
-      let profile;
-
-      // If profile exists but incomplete, update it
-      if (existingProfile) {
-        profile = await UserProfile.findOneAndUpdate(
-          { user_id: req.user._id },
-          { profileType },
-          { new: true },
-        );
-      } else {
-        // Create new profile
-        profile = await UserProfile.create({
-          user_id: req.user._id,
-          profileType,
-        });
-      }
-
-      res.json({
-        message: "Profile type selected",
-        profile,
-      });
-    } catch (error) {
-      next(error);
+  try {
+    if (!["farmer", "vendor"].includes(profileType)) {
+      throw new ValidationError(
+        "Profile type must be farmer or vendor",
+        "profileType",
+      );
     }
-  },
-);
+
+    const existingProfile = await UserProfile.getUserProfile(req.user._id);
+
+    // If profile is already complete, don't allow re-initialization
+    if (existingProfile && existingProfile.isProfileComplete) {
+      return res.status(400).json({
+        error: "Profile already completed",
+        code: "PROFILE_ALREADY_COMPLETE",
+      });
+    }
+
+    let profile;
+
+    // If profile exists but incomplete, update it
+    if (existingProfile) {
+      profile = await UserProfile.findOneAndUpdate(
+        { user_id: req.user._id },
+        { profileType },
+        { new: true },
+      );
+    } else {
+      // Create new profile
+      profile = await UserProfile.create({
+        user_id: req.user._id,
+        profileType,
+      });
+    }
+
+    res.json({
+      message: "Profile type selected",
+      profile,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 /**
  * POST /api/profile/farmer
- * Complete farmer profile - requires email verification
+ * Complete farmer profile
+ * No email verification required - part of onboarding flow
  */
-router.post("/farmer", emailVerificationRequired, async (req, res, next) => {
+router.post("/farmer", async (req, res, next) => {
   const farmerData = req.body;
 
   try {
@@ -127,11 +125,16 @@ router.post("/farmer", emailVerificationRequired, async (req, res, next) => {
 
     // Generate matches for this newly completed profile
     if (profile && profile.isProfileComplete) {
+      console.log(`[Profile] Generating matches for farmer ${req.user._id}`);
       generateMatchesForProfile(req.user._id, profile).catch((error) => {
-        console.error("Error generating matches for farmer profile:", error);
+        console.error(
+          "[Profile] Error generating matches for farmer profile:",
+          error.message,
+        );
       });
     }
 
+    console.log(`[Profile] Farmer profile completed for ${req.user._id}`);
     res.json({
       message: "Farmer profile completed successfully",
       profile,
@@ -143,9 +146,10 @@ router.post("/farmer", emailVerificationRequired, async (req, res, next) => {
 
 /**
  * POST /api/profile/vendor
- * Complete vendor profile - requires email verification
+ * Complete vendor profile
+ * No email verification required - part of onboarding flow
  */
-router.post("/vendor", emailVerificationRequired, async (req, res, next) => {
+router.post("/vendor", async (req, res, next) => {
   const vendorData = req.body;
 
   try {
@@ -203,11 +207,16 @@ router.post("/vendor", emailVerificationRequired, async (req, res, next) => {
 
     // Generate matches for this newly completed profile
     if (profile && profile.isProfileComplete) {
+      console.log(`[Profile] Generating matches for vendor ${req.user._id}`);
       generateMatchesForProfile(req.user._id, profile).catch((error) => {
-        console.error("Error generating matches for vendor profile:", error);
+        console.error(
+          "[Profile] Error generating matches for vendor profile:",
+          error.message,
+        );
       });
     }
 
+    console.log(`[Profile] Vendor profile completed for ${req.user._id}`);
     res.json({
       message: "Vendor profile completed successfully",
       profile,

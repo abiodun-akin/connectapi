@@ -6,6 +6,7 @@ const axios = require("axios");
 const jwt = require("jsonwebtoken");
 const User = require("../user");
 const Subscription = require("../subscription");
+const SocialExchange = require("../SocialExchange");
 const PromoCode = require("../promoCode");
 const AgentLedger = require("../agentLedger");
 const UserProfile = require("../userProfile");
@@ -52,21 +53,20 @@ const TWO_FACTOR_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const TWO_FACTOR_MAX_ATTEMPTS = 5;
 const SOCIAL_EXCHANGE_TTL_MS = 5 * 60 * 1000; // 5 minutes (300 seconds) - increased from 60s to accommodate slow networks and mobile
 
-// In-memory store for one-time OAuth exchange codes: code -> { token, expiresAt }
-const socialExchangeStore = new Map();
-
-const createSocialExchangeCode = (token) => {
+const createSocialExchangeCode = async (token) => {
   const code = crypto.randomBytes(32).toString("hex");
-  socialExchangeStore.set(code, { token, expiresAt: Date.now() + SOCIAL_EXCHANGE_TTL_MS });
+  await SocialExchange.create({
+    code,
+    token,
+  });
   return code;
 };
 
-const consumeSocialExchangeCode = (code) => {
-  const entry = socialExchangeStore.get(code);
-  if (!entry) return null;
-  socialExchangeStore.delete(code);
-  if (Date.now() > entry.expiresAt) return null;
-  return entry.token;
+const consumeSocialExchangeCode = async (code) => {
+  // Use findOneAndDelete to ensure atomicity and single-use
+  // The TTL index in MongoDB handles expiration automatically
+  const entry = await SocialExchange.findOneAndDelete({ code });
+  return entry ? entry.token : null;
 };
 
 const extractAuthToken = (req) => {
@@ -75,7 +75,7 @@ const extractAuthToken = (req) => {
 };
 
 const getTokenSecret = () =>
-  process.env.TOKEN_SECRET || "fallback-secret-for-dev-only";
+  process.env.TOKEN_SECRET;
 
 const signAuthToken = (userId) =>
   jwt.sign({ id: userId }, getTokenSecret(), {
@@ -608,25 +608,11 @@ router.post(
         token,
       });
     } catch (error) {
-      console.error("[SIGNUP ERROR] Caught error:", {
-        code: error.code,
-        message: error.message,
-        field: error.keyPattern ? Object.keys(error.keyPattern)[0] : null,
-        keyPattern: error.keyPattern,
-        keyValue: error.keyValue,
-        name: error.name,
-      });
-
       if (error.code === 11000) {
         const field = error.keyPattern
           ? Object.keys(error.keyPattern)[0]
           : "email";
-        const dupError = new ConflictError(`${field} already registered`);
-        console.error(
-          "[SIGNUP ERROR] Returning conflict error:",
-          dupError.message,
-        );
-        return next(dupError);
+        return next(new ConflictError(`${field} already registered`));
       }
       next(error);
     }
@@ -705,16 +691,6 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
       token,
     });
   } catch (error) {
-    // Enhanced logging for debugging authentication issues
-    console.error("Authentication Error - Login Failed", {
-      email: req.body?.email || "unknown",
-      errorMessage: error.message,
-      errorCode: error.code,
-      timestamp: new Date().toISOString(),
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
-    });
-    
     next(new AuthenticationError("Invalid email or password"));
   }
 });
@@ -1255,21 +1231,7 @@ router.get("/social/:provider/start", async (req, res) => {
 
     return res.redirect(authorizationUrl.toString());
   } catch (error) {
-    // Enhanced logging for OAuth configuration issues
-    console.error("Authentication Error - OAuth Start Failed", {
-      provider,
-      mode,
-      errorMessage: error.message,
-      errorCode: error.code || "UNKNOWN",
-      timestamp: new Date().toISOString(),
-      ipAddress: req.ip,
-      configDetails: {
-        hasClientId: !!process.env.GOOGLE_OAUTH_CLIENT_ID || !!process.env.GOOGLE_CLIENT_ID,
-        hasClientSecret: !!process.env.GOOGLE_OAUTH_CLIENT_SECRET || !!process.env.GOOGLE_CLIENT_SECRET,
-        redirectUriConfigured: !!process.env.GOOGLE_OAUTH_REDIRECT_URI,
-      },
-    });
-    
+    console.error("[OAuth Start] Failed:", error.message);
     const redirectUrl = getFrontendCallbackUrl({
       provider,
       mode,
@@ -1286,68 +1248,34 @@ router.get("/social/:provider/callback", async (req, res) => {
     const providerConfig = getSocialProviderConfig(provider, req);
     ensureProviderConfigured(providerConfig);
 
-    console.log("[OAuth Callback] Started", {
-      provider,
-      timestamp: new Date().toISOString(),
-    });
-
     if (req.query.error) {
-      console.warn("[OAuth Callback] OAuth provider error", {
-        provider,
-        error: req.query.error,
-        errorDescription: req.query.error_description,
-      });
       throw new AuthenticationError(
         String(req.query.error_description || req.query.error),
       );
     }
 
     if (!req.query.code || !req.query.state) {
-      console.warn("[OAuth Callback] Missing code or state", {
-        provider,
-        hasCode: !!req.query.code,
-        hasState: !!req.query.state,
-      });
       throw new AuthenticationError("Social authentication was not completed");
     }
 
     const state = jwt.verify(String(req.query.state), getTokenSecret());
     if (state.provider !== provider) {
-      console.warn("[OAuth Callback] State provider mismatch", {
-        provider,
-        stateProvider: state.provider,
-      });
       throw new AuthenticationError("Invalid social authentication state");
     }
-
-    console.log("[OAuth Callback] Exchanging authorization code", {
-      provider,
-    });
 
     const tokenSet = await exchangeAuthorizationCode(
       providerConfig,
       String(req.query.code),
     );
 
-    console.log("[OAuth Callback] Code exchanged successfully", { provider });
-
     const profile = await fetchSocialProfile(
       providerConfig,
       tokenSet.access_token,
     );
 
-    console.log("[OAuth Callback] Profile fetched", {
-      provider,
-      email: profile.email,
-    });
-
     const { user, isNewUser } = await findOrCreateSocialUser(provider, profile);
 
     if (user.isSuspended) {
-      console.warn("[OAuth Callback] User account suspended", {
-        provider,
-        userId: user._id,
-      });
       throw new AuthorizationError("Account suspended");
     }
 
@@ -1385,14 +1313,7 @@ router.get("/social/:provider/callback", async (req, res) => {
       userAgent: req.get("User-Agent"),
     });
 
-    const exchangeCode = createSocialExchangeCode(token);
-
-    console.log("[OAuth Callback] Exchange code created", {
-      provider,
-      userId: user._id,
-      isNewUser,
-      ttlSeconds: SOCIAL_EXCHANGE_TTL_MS / 1000,
-    });
+    const exchangeCode = await createSocialExchangeCode(token);
 
     return res.redirect(
       getFrontendCallbackUrl({
@@ -1404,17 +1325,7 @@ router.get("/social/:provider/callback", async (req, res) => {
       }),
     );
   } catch (error) {
-    // Enhanced logging for OAuth debugging
-    console.error("Authentication Error - OAuth Callback Failed", {
-      provider: String(req.params.provider || "").toLowerCase(),
-      errorMessage: error.message,
-      errorCode: error.code || "UNKNOWN",
-      errorDetails: error.details || {},
-      timestamp: new Date().toISOString(),
-      ipAddress: req.ip,
-      queryParams: Object.keys(req.query),
-    });
-
+    console.error("[OAuth Callback] Failed:", error.message);
     return res.redirect(
       getFrontendCallbackUrl({
         provider,
@@ -1425,71 +1336,37 @@ router.get("/social/:provider/callback", async (req, res) => {
 });
 
 router.post("/social/exchange", async (req, res, next) => {
-  const startTime = Date.now();
   const { code } = req.body || {};
 
   try {
-    console.log("[OAuth Exchange] Started", {
-      codeLength: code?.length || null,
-      timestamp: new Date().toISOString(),
-    });
-
     if (!code || typeof code !== "string" || code.length !== 64) {
-      console.warn("[OAuth Exchange] Validation failed", {
-        provided: code?.length || null,
-        expected: 64,
-        type: typeof code,
-      });
       throw new ValidationError("Invalid exchange code", "code");
     }
 
-    const token = consumeSocialExchangeCode(code);
+    const token = await consumeSocialExchangeCode(code);
     if (!token) {
-      console.warn("[OAuth Exchange] Code not found or expired", {
-        codePrefix: code?.substring(0, 8) + "...",
-        timestamp: new Date().toISOString(),
-      });
-      throw new AuthenticationError("Exchange code is invalid or has expired");
+      throw new AuthenticationError(
+        "Exchange code is invalid or has expired",
+        "EXCHANGE_CODE_EXPIRED",
+      );
     }
 
     let decoded;
     try {
       decoded = jwt.verify(token, getTokenSecret());
     } catch (_err) {
-      console.error("[OAuth Exchange] Token verification failed", {
-        error: _err.message,
-      });
       throw new AuthenticationError("Invalid session token");
     }
 
     const user = await User.findById(decoded.id);
     if (!user || user.isSuspended) {
-      console.warn("[OAuth Exchange] User not found or suspended", {
-        userId: decoded.id,
-        suspended: user?.isSuspended || false,
-      });
       throw new AuthenticationError("User not found or suspended");
     }
 
     const authUser = await serializeAuthUser(user);
     setAuthCookie(res, token);
-
-    console.log("[OAuth Exchange] Success", {
-      userId: user._id,
-      email: user.email,
-      duration: Date.now() - startTime,
-      timestamp: new Date().toISOString(),
-    });
-
     res.json({ user: authUser, token });
   } catch (error) {
-    console.error("[OAuth Exchange] Failed", {
-      code: code?.substring(0, 8) + "..." || "MISSING",
-      error: error.message,
-      errorCode: error.code || "UNKNOWN",
-      duration: Date.now() - startTime,
-      timestamp: new Date().toISOString(),
-    });
     next(error);
   }
 });
