@@ -1,0 +1,125 @@
+services:
+  # ==================
+  # Backend API (Web Service)
+  # ==================
+  - type: web
+    name: farmconnect-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8888
+      - key: NODE_ENV
+        value: production
+      - key: CONN_STR
+        sync: false
+      - key: TOKEN_SECRET
+        generateValue: true
+      - key: TOKEN_EXPIRATION
+        value: 7d
+      - key: FRONTEND_ORIGIN
+        value: https://farmconnect.hybritekconsult.com
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: RABBITMQ_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: SUPER_ADMIN_NAME
+        value: Super Admin
+      - key: SUPER_ADMIN_ROTATE_PASSWORD
+        value: "false"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: BEEM_API_KEY
+        sync: false
+      - key: BEEM_SECRET_KEY
+        sync: false
+      - key: BEEM_FROM_NAME
+        value: FarmConnect
+      - key: AGENT_WITHDRAWAL_THRESHOLD
+        value: "5000"
+
+  # ==================
+  # Notification Worker (Background Worker)
+  # ==================
+  - type: worker
+    name: farmconnect-notification-worker
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RABBITMQ_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: CONN_STR
+        sync: false
+      - key: TOKEN_SECRET
+        sync: false
+
+  # ==================
+  # Trial Processing Cron Job
+  # ==================
+  - type: cron
+    name: farmconnect-trial-processor
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    schedule: "0 */6 * * *" # Every 6 hours
+    startCommand: npm run trial:process
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CONN_STR
+        sync: false
+      - key: RABBITMQ_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+
+# ==================
+# External Services
+# ==================
+# MongoDB Atlas is configured via CONN_STR environment variable
+# RabbitMQ is configured via RABBITMQ_URL environment variable
