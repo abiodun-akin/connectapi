@@ -42,10 +42,10 @@ const LISTING_MODERATION_ACTION_TO_STATUS = {
 };
 
 const resolveModerationStatus = (action) => {
-  const normalizedAction = String(action || "")
-    .trim()
-    .toLowerCase();
-  return LISTING_MODERATION_ACTION_TO_STATUS[normalizedAction] || null;
+  if (typeof action !== "string") return null;
+  return (
+    LISTING_MODERATION_ACTION_TO_STATUS[action.trim().toLowerCase()] || null
+  );
 };
 
 /**
