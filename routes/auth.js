@@ -47,7 +47,8 @@ const verifyEmailSchema = {
   },
 };
 
-const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "1d";
+const AUTH_TOKEN_EXPIRATION = process.env.TOKEN_EXPIRATION || "2h";
+const REFRESH_TOKEN_EXPIRATION = process.env.REFRESH_TOKEN_EXPIRATION || "7d";
 const TWO_FACTOR_CHALLENGE_EXPIRATION = "10m";
 const TWO_FACTOR_CODE_EXPIRY_MS = 10 * 60 * 1000;
 const TWO_FACTOR_MAX_ATTEMPTS = 5;
@@ -277,6 +278,29 @@ const serializeAuthUser = async (user) => {
             ? "microsoft"
             : "local",
   };
+};
+
+const autoEnableTwoFactorForAdmin = async (user) => {
+  // Auto-enable 2FA for admin accounts if not already enabled
+  if (user.isAdmin && !user.twoFactorEnabled) {
+    user.twoFactorEnabled = true;
+    user.twoFactorCodeHash = null;
+    user.twoFactorCodeExpiresAt = null;
+    user.twoFactorAttemptCount = 0;
+
+    // Generate recovery codes if not already generated
+    if (!user.twoFactorRecoveryCodes || user.twoFactorRecoveryCodes.length === 0) {
+      const plainCodes = User.generateRecoveryCodes();
+      user.setRecoveryCodes(plainCodes);
+    }
+
+    await user.save();
+
+    console.log(`[Auth] Auto-enabled 2FA for admin user: ${user.email}`);
+    return true; // Indicates 2FA was auto-enabled
+  }
+  return false;
+};
 };
 
 const resolveAuthenticatedSession = async (req) => {
@@ -624,6 +648,9 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
   try {
     const user = await User.login({ email, password });
 
+    // Auto-enable 2FA for admin accounts
+    const wasAutoEnabled = await autoEnableTwoFactorForAdmin(user);
+
     if (user.twoFactorEnabled) {
       const code = generateTwoFactorCode();
       user.twoFactorCodeHash = hashToken(code);
@@ -641,6 +668,8 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
         name: user.name,
         code,
         expiresInMinutes: 10,
+        isAdmin: user.isAdmin,
+        autoEnabledForAdmin: wasAutoEnabled,
         ...buildAuthEventMetadata(req, {
           authMethod: "password+2fa",
         }),
@@ -650,6 +679,8 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
         message: "Two-factor authentication code sent",
         requiresTwoFactor: true,
         challengeToken,
+        isAdmin: user.isAdmin,
+        autoEnabledForAdmin: wasAutoEnabled,
       });
     }
 
@@ -664,6 +695,7 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
     publishEvent("auth_events", "auth.login", {
       userId: user._id,
       email: user.email,
+      isAdmin: user.isAdmin,
       ...buildAuthEventMetadata(req, {
         authMethod: "password",
       }),
@@ -677,6 +709,7 @@ router.post("/login", validateRequest(loginSchema), async (req, res, next) => {
       resourceId: user._id,
       details: {
         authMethod: "password",
+        isAdmin: user.isAdmin,
         ipAddress: req.ip,
         userAgent: req.get("User-Agent"),
       },

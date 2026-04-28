@@ -991,4 +991,114 @@ router.get("/subscriptions/cancelled", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/admin/2fa-settings
+ * Get admin's 2FA settings (always enabled for admins)
+ */
+router.get("/2fa-settings", async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select(
+      "twoFactorEnabled twoFactorRecoveryCodes twoFactorRecoveryCodesGeneratedAt",
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    res.json({
+      twoFactorEnabled: Boolean(user.twoFactorEnabled),
+      recoveryCodesCount: user.twoFactorRecoveryCodes?.length || 0,
+      recoveryCodesGeneratedAt: user.twoFactorRecoveryCodesGeneratedAt,
+      requiresTwoFactor: user.isAdmin, // Admins always require 2FA
+      message: "Two-factor authentication is mandatory for admin accounts",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/2fa/recovery-codes
+ * Regenerate recovery codes for admin account
+ */
+router.post("/2fa/recovery-codes", async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select(
+      "+twoFactorRecoveryCodes +twoFactorRecoveryCodesGeneratedAt",
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    if (!user.twoFactorEnabled) {
+      return res.status(400).json({
+        error: "Two-factor authentication is not enabled",
+        code: "2FA_NOT_ENABLED",
+      });
+    }
+
+    // Generate new recovery codes
+    const plainCodes = User.generateRecoveryCodes();
+    user.setRecoveryCodes(plainCodes);
+    user.twoFactorRecoveryCodesGeneratedAt = new Date();
+    await user.save();
+
+    res.json({
+      message: "Recovery codes regenerated successfully",
+      recoveryCodes: plainCodes,
+      status:
+        "Store these new codes in a safe place. Each code can be used once.",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/2fa/disable
+ * Prevent admin from disabling 2FA
+ * Returns error since 2FA is mandatory for admins
+ */
+router.post("/2fa/disable", async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    if (user.isAdmin) {
+      return res.status(403).json({
+        error:
+          "Two-factor authentication cannot be disabled for admin accounts",
+        code: "ADMIN_2FA_MANDATORY",
+        message: "2FA is required for all administrators for security purposes",
+      });
+    }
+
+    // Non-admin users can disable 2FA
+    user.twoFactorEnabled = false;
+    user.twoFactorCodeHash = null;
+    user.twoFactorCodeExpiresAt = null;
+    user.twoFactorAttemptCount = 0;
+    user.twoFactorRecoveryCodes = [];
+    user.twoFactorRecoveryCodesGeneratedAt = null;
+    await user.save();
+
+    res.json({ message: "Two-factor authentication disabled" });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
