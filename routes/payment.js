@@ -326,38 +326,88 @@ router.post(
 
 /**
  * POST /api/payment/close
- * Cancel subscription
+ * Close payment modal - does NOT cancel subscription
+ * User is closing the Paystack payment modal, not cancelling their subscription
+ * This endpoint is for payment flow closure, not subscription cancellation
  * Requires email verification
  */
 router.post("/close", emailVerificationRequired, async (req, res, next) => {
   try {
-    // Cancel user's active subscription
-    const subscription = await Subscription.findOne({
-      user_id: req.user._id,
-      status: { $in: ["active", "trial"] },
-    });
+    // Get the payment reference if provided (for tracking)
+    const { reference } = req.body;
 
-    if (subscription) {
-      await Subscription.cancelSubscription(
-        req.user._id,
-        "User-initiated cancellation",
-      );
-
-      // Record cancellation violation
-      await recordPaymentViolation(req.user._id, "cancellation");
+    // If payment reference provided, mark it as failed
+    if (reference) {
+      try {
+        await PaymentRecord.updatePaymentStatus(reference, "failed");
+      } catch (updateErr) {
+        console.error(
+          "[Payment Close] Failed to update payment record:",
+          updateErr.message,
+        );
+        // Continue anyway - payment record update is not critical
+      }
     }
 
     publishEvent("payment_events", "payment.closed", {
       userId: req.user._id,
       email: req.user.email,
+      reference: reference || null,
       timestamp: new Date(),
+      reason: "User closed payment modal",
     });
 
-    res.json({ message: "Subscription cancelled successfully" });
+    res.json({
+      message: "Payment cancelled. Your subscription remains active.",
+      subscriptionPreserved: true,
+    });
   } catch (error) {
     next(error);
   }
 });
+
+/**
+ * POST /api/payment/cancel-subscription
+ * Explicitly cancel user's active subscription
+ * This is distinct from payment close - user is requesting subscription cancellation
+ * Requires email verification
+ */
+router.post(
+  "/cancel-subscription",
+  emailVerificationRequired,
+  async (req, res, next) => {
+    try {
+      const subscription = await Subscription.findOne({
+        user_id: req.user._id,
+        status: { $in: ["active", "trial"] },
+      });
+
+      if (!subscription) {
+        throw new NotFoundError("No active subscription found");
+      }
+
+      const cancellationReason =
+        req.body.reason || "User-initiated subscription cancellation";
+
+      await Subscription.cancelSubscription(req.user._id, cancellationReason);
+
+      // Record cancellation violation (only for explicit cancellations)
+      await recordPaymentViolation(req.user._id, "cancellation");
+
+      publishEvent("payment_events", "subscription.cancelled", {
+        userId: req.user._id,
+        email: req.user.email,
+        subscriptionId: subscription._id,
+        reason: cancellationReason,
+        timestamp: new Date(),
+      });
+
+      res.json({ message: "Subscription cancelled successfully" });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 /**
  * POST /api/payment/cancel-renewal
